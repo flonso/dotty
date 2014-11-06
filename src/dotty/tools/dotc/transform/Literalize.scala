@@ -4,9 +4,11 @@ package transform
 import TreeTransforms._
 import core.DenotTransformers._
 import core.Symbols._
+import core.SymDenotations._
 import core.Contexts._
 import core.Types._
 import core.Flags._
+import core.NameOps._
 import core.Decorators._
 import core.StdNames.nme
 import ast.Trees._
@@ -15,12 +17,20 @@ import ast.Trees._
  *  The constant types are eliminated by erasure, so we need to keep
  *  the info about constantness in the trees.
  */
-class Literalize extends MiniPhaseTransform {
+class Literalize extends MiniPhaseTransform with SymTransformer { thisTransform =>
   import ast.tpd._
 
   override def phaseName: String = "literalize"
 
-  /** Note: Demanding idempotency instead of purity is strictly speaking too loose.
+  override def transformSym(d: SymDenotation)(implicit ctx: Context) =
+    if (d.is(NotJavaPrivate))
+      d.copySymDenotation(
+        initFlags = d.flags &~ Private &~ NotJavaPrivate | ExpandedName,
+        name = if (d.isConstructor || d.is(ExpandedName)) d.name else d.name.expandedName(d.owner)
+      ).relinkedAfter(thisTransform)
+    else d
+
+    /** Note: Demanding idempotency instead of purity is strictly speaking too loose.
    *  Example
    *
    *    object O { final val x = 42; println("43") }

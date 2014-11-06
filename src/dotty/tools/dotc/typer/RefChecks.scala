@@ -716,7 +716,9 @@ class RefChecks extends MiniPhase with SymTransformer { thisTransformer =>
       (isDerivedValueClass(cls) && mustBePublicInValueClass ||
       cls.is(Trait) && mustBePublicInTrait)
     }
-    if ((d is PrivateTerm) && mustBePublic) notPrivate(d) else d
+    if ((d is Private) && (d.isTerm || d.isClass) && d.name != nme.WILDCARD
+        && mustBePublic && !d.isSelfSym) notPrivate(d)
+    else d
   }
 
   /** Make private terms accessed from different classes non-private.

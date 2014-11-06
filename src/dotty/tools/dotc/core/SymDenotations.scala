@@ -950,6 +950,21 @@ object SymDenotations {
     /** Install this denotation as the result of the given denotation transformer. */
     override def installAfter(phase: DenotTransformer)(implicit ctx: Context): Unit =
       super.installAfter(phase)
+
+    /** If symbol is a class member that has a new name after phase `phase`, relink
+     *  it in the scope of the owning class
+     */
+    def relinkedAfter(phase: DenotTransformer)(implicit ctx: Context) = {
+      val prevName = ctx.atPhase(phase) { implicit ctx => symbol.name }
+      if (name != prevName) {
+        val cls = owner.asClass
+        ctx.atPhase(phase.next) { implicit ctx =>
+          cls.ensureFreshScopeAfter(phase)
+          cls.relink(symbol, prevName, name)
+        }
+      }
+      this
+    }
   }
 
   /** The contents of a class definition during a period
@@ -1168,7 +1183,7 @@ object SymDenotations {
       var fp = FingerPrint()
       var e = info.decls.lastEntry
       while (e != null) {
-        fp.include(e.sym.name)
+        fp.include(e.name)
         e = e.prev
       }
       var ps = classParents
@@ -1228,15 +1243,18 @@ object SymDenotations {
       enterNoReplace(sym, mscope)
     }
 
+    private def updateCaches(name: Name)(implicit ctx: Context): Unit = {
+      require(!(this is Frozen))
+      if (myMemberCache != null)
+        myMemberCache invalidate name
+    }
+
     /** Enter a symbol in given `scope` without potentially replacing the old copy. */
     def enterNoReplace(sym: Symbol, scope: MutableScope)(implicit ctx: Context): Unit = {
-      require(!(this is Frozen))
       scope.enter(sym)
-
+      updateCaches(sym.name)
       if (myMemberFingerPrint != FingerPrint.unknown)
         myMemberFingerPrint.include(sym.name)
-      if (myMemberCache != null)
-        myMemberCache invalidate sym.name
     }
 
     /** Replace symbol `prev` (if defined in current class) by symbol `replacement`.
@@ -1244,10 +1262,8 @@ object SymDenotations {
      *  @pre `prev` and `replacement` have the same name.
      */
     def replace(prev: Symbol, replacement: Symbol)(implicit ctx: Context): Unit = {
-      require(!(this is Frozen))
       decls.asInstanceOf[MutableScope].replace(prev, replacement)
-      if (myMemberCache != null)
-        myMemberCache invalidate replacement.name
+      updateCaches(replacement.name)
     }
 
     /** Delete symbol from current scope.
@@ -1255,12 +1271,24 @@ object SymDenotations {
      *  someone does a findMember on a subclass.
      */
     def delete(sym: Symbol)(implicit ctx: Context) = {
-      require(!(this is Frozen))
       info.decls.asInstanceOf[MutableScope].unlink(sym)
+      updateCaches(sym.name)
       if (myMemberFingerPrint != FingerPrint.unknown)
         computeMemberFingerPrint
-      if (myMemberCache != null)
-        myMemberCache invalidate sym.name
+    }
+
+    /** Relink symbol `sym`, which got a new name, in the scope of its class owner
+     *  @param sym   The symbol to re-link
+     *  @param from  The name under which the symbol was found in the scope so far.
+     *  @param to    The name under which the symbol should be found from now on.
+     *  The symbol will stay as the same relative position in the scope.
+     */
+    def relink(sym: Symbol, from: Name, to: Name)(implicit ctx: Context) = {
+      info.decls.asInstanceOf[MutableScope].relink(sym, from, to)
+      updateCaches(from)
+      updateCaches(to)
+      if (myMemberFingerPrint != FingerPrint.unknown)
+        computeMemberFingerPrint
     }
 
     /** All members of this class that have the given name.

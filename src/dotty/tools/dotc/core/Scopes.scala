@@ -37,8 +37,9 @@ object Scopes {
    */
   private final val MaxRecursions = 1000
 
-  class ScopeEntry private[Scopes] (val name: Name, _sym: Symbol, val owner: Scope) {
+  class ScopeEntry private[Scopes] (_name: Name, _sym: Symbol, val owner: Scope) {
 
+    var name: Name = _name
     var sym: Symbol = _sym
 
     /** the next entry in the hash bucket
@@ -264,6 +265,12 @@ object Scopes {
         while (e1.prev != e) e1 = e1.prev
         e1.prev = e.prev
       }
+      unlinkFromHash(e)
+      elemsCache = null
+      size -= 1
+    }
+
+    private def unlinkFromHash(e: ScopeEntry)(implicit ctx: Context): Unit = {
       if (hashTable ne null) {
         val index = e.name.hashCode & (hashTable.length - 1)
         var e1 = hashTable(index)
@@ -274,8 +281,6 @@ object Scopes {
           e1.tail = e.tail
         }
       }
-      elemsCache = null
-      size -= 1
     }
 
     /** remove symbol from this scope if it is present */
@@ -298,6 +303,22 @@ object Scopes {
         e = lookupNextEntry(e)
       }
       elemsCache = null
+    }
+
+    /** Relink symbol `sym`, which got a new name, in this scope.
+     *  @param sym   The symbol to re-link
+     *  @param from  The name under which the symbol was found in the scope so far.
+     *  @param to    The name under which the symbol should be found from now on.
+     *  The symbol will stay as the same relative position in the scope.
+     */
+    final def relink(sym: Symbol, from: Name, to: Name)(implicit ctx: Context): Unit = {
+      var e = lookupEntry(from)
+      while (e.sym != sym) {
+        e = lookupNextEntry(e)
+      }
+      if (hashTable != null) unlinkFromHash(e)
+      e.name = to
+      if (hashTable != null) enterInHash(e)
     }
 
     /** Lookup a symbol entry matching given name.
