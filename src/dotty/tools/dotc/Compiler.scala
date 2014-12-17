@@ -35,11 +35,12 @@ class Compiler {
   def phases: List[List[Phase]] =
     List(
       List(new FrontEnd),
-      List(new FirstTransform,
+      List(//new FirstTransform,
            new SyntheticMethods),
       List(new SuperAccessors),
+      List(new Serialize)
       // pickling goes here
-      List(new RefChecks,
+      /*List(new RefChecks,
            new ElimRepeated,
            new ElimLocals,
            new ExtensionMethods,
@@ -61,7 +62,7 @@ class Compiler {
       List(new LambdaLift,
            new Flatten,
            new RestoreScopes),
-      List(new PrivateToStatic)
+      List(new PrivateToStatic)*/
     )
 
   var runId = 1
