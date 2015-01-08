@@ -36,6 +36,24 @@ class PickleBuffer(data: Array[Byte], from: Int, to: Int) {
     writeIndex += 1
   }
 
+  def writeRawLong(b: Long): Unit = {
+    writeByte(((b >>> 56) & 0xFF).toInt)
+    writeByte(((b >>> 48) & 0xFF).toInt)
+    writeByte(((b >>> 40) & 0xFF).toInt)
+    writeByte(((b >>> 32) & 0xFF).toInt)
+    writeByte(((b >>> 24) & 0xFF).toInt)
+    writeByte(((b >>> 16) & 0xFF).toInt)
+    writeByte(((b >>> 8) & 0xFF).toInt)
+    writeByte(((b >>> 0) & 0xFF).toInt)
+  }
+
+  def writeRawInt(b: Int): Unit = {
+    writeByte(((b >>> 24) & 0xFF).toInt)
+    writeByte(((b >>> 16) & 0xFF).toInt)
+    writeByte(((b >>> 8) & 0xFF).toInt)
+    writeByte(((b >>> 0) & 0xFF).toInt)
+  }
+
   /** Write a natural number in big endian format, base 128.
    *  All but the last digits have bit 0x80 set.
    */
@@ -67,6 +85,7 @@ class PickleBuffer(data: Array[Byte], from: Int, to: Int) {
    *  @param x   ...
    */
   def patchNat(pos: Int, x: Int): Unit = {
+    // todo: this is very inefficient(could copy array 8 times)
     def patchNatPrefix(x: Int): Unit = {
       writeByte(0)
       Array.copy(bytes, pos, bytes, pos+1, writeIndex - (pos+1))
@@ -183,6 +202,17 @@ class PickleBuffer(data: Array[Byte], from: Int, to: Int) {
     }
     index
   }
+
+  /** append bytes bts[start..start + len - 1] */
+  def writeBytes(bts: Array[Byte], start: Int, len: Int): Unit = {
+    if(len > 0) {
+      ensureCapacity(len)
+      Array.copy(bts, start, bytes, writeIndex, len)
+      writeIndex += len
+    }
+  }
+
+  def writeBytes(bts: Array[Byte]): Unit = writeBytes(bts, 0, bts.length)
 }
 
 object PickleBuffer {
