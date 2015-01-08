@@ -7,6 +7,7 @@
 SCALA_VERSION=2.11.1
 SCALA_BINARY_VERSION=2.11
 DOTTY_VERSION=0.1
+XZ_VERSION=1.5
 bootcp=true
 default_java_opts="-Xmx768m -Xms768m"
 programName=$(basename "$0")
@@ -62,12 +63,18 @@ if [ "$SCALA_REFLECT_JAR" == "" ]
 then  
   SCALA_REFLECT_JAR=$HOME/.ivy2/cache/org.scala-lang/scala-reflect/jars/scala-reflect-$SCALA_VERSION.jar
 fi
+if [ "$XZ_LIBRARY_JAR" == "" ]
+then
+  XZ_LIBRARY_JAR=$HOME/.ivy2/cache/org.tukaani/xz/jars/xz-$XZ_VERSION.jar
+  # this is location where sbt stores it in ivy cache
+fi
 
-if [ ! -f "$SCALA_LIBRARY_JAR" -o ! -f "$SCALA_REFLECT_JAR" ]
+if [ ! -f "$SCALA_LIBRARY_JAR" -o ! -f "$SCALA_REFLECT_JAR" -o ! -f "$XZ_LIBRARY_JAR" ]
 then
   echo To use this script please set 
   echo SCALA_LIBRARY_JAR to point to scala-library-$SCALA_VERSION.jar "(currently $SCALA_LIBRARY_JAR)"
   echo SCALA_REFLECT_JAR to point to scala-reflect-$SCALA_VERSION.jar "(currently $SCALA_REFLECT_JAR)"
+  echo XZ_LIBRARY_JAR to point to xz-$XZ_VERSION.jar from "http://tukaani.org/xz/java.html" "(currently $SCALA_REFLECT_JAR)"
 fi
 
 ifdebug () {
@@ -156,9 +163,9 @@ trap onExit INT
 # to java to suppress "." from materializing.
 classpathArgs () {
   if [[ -n $bootcp ]]; then
-echo "-Xbootclasspath/a:$SCALA_LIBRARY_JAR:$SCALA_REFLECT_JAR:$MAIN_JAR -classpath $MAIN_JAR"
+echo "-Xbootclasspath/a:$SCALA_LIBRARY_JAR:$SCALA_REFLECT_JAR:$XZ_LIBRARY_JAR:$MAIN_JAR -classpath $MAIN_JAR"
   else
-echo "-classpath $SCALA_LIBRARY_JAR:$SCALA_REFLECT_JAR:$MAIN_JAR"
+echo "-classpath $SCALA_LIBRARY_JAR:$SCALA_REFLECT_JAR:$XZ_LIBRARY_JAR:$MAIN_JAR"
   fi
 }
 

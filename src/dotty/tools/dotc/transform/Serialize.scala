@@ -1,6 +1,6 @@
 package dotty.tools.dotc.transform
 
-import java.io.{FileOutputStream, BufferedOutputStream, BufferedWriter}
+import java.io.{File, FileOutputStream, BufferedOutputStream, BufferedWriter}
 
 import dotty.tools.dotc.ast.Trees.GenericApply
 import dotty.tools.dotc.ast.{untpd, tpd, Trees}
@@ -10,6 +10,7 @@ import dotty.tools.dotc.core.Symbols
 import Symbols._
 import dotty.tools.dotc.core.pickling.PickleBuffer
 import dotty.tools.dotc.transform.TreeTransforms._
+import org.tukaani.xz.{LZMA2Options, XZOutputStream}
 import tpd._
 import dotty.tools.dotc.core.Types._
 
@@ -410,10 +411,25 @@ class Serialize extends MiniPhaseTransform {
 
       val f = java.io.File.createTempFile("serializedTree", ".tasty")
       f.createNewFile()
-      println(s"flushed tree: $tree to " + f.getCanonicalPath)
+
       val d = new BufferedOutputStream(new FileOutputStream(f))
+      println(s"flushing ${output.writeIndex} bytes of tree: $tree to ${f.getCanonicalPath}")
       d.write(output.bytes, 0, output.writeIndex)
       d.close()
+
+
+      val xzf = new File(f.getCanonicalPath + ".xz")
+
+      val cf = new BufferedOutputStream(new FileOutputStream(xzf))
+      val outxz = new XZOutputStream(cf, new LZMA2Options(6))
+
+      println(s"Compressing to ${xzf.getCanonicalPath}")
+      outxz.write(output.bytes, 0, output.writeIndex)
+      outxz.close()
+      val csize = xzf.length() - 64
+      println(s"Compressed size $csize, compression ratio ${(csize - 64) * 1.0 / output.writeIndex}, + additional 64 bits of CRC64")
+
+
     }
 
 
