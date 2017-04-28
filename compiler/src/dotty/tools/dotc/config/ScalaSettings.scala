@@ -36,7 +36,7 @@ class ScalaSettings extends Settings.SettingGroup {
   val usejavacp = BooleanSetting("-usejavacp", "Utilize the java.class.path in classpath resolution.")
   val verbose = BooleanSetting("-verbose", "Output messages about what the compiler is doing.")
   val version = BooleanSetting("-version", "Print product version and exit.")
-  val pageWidth = IntSetting("-pagewidth", "Set page width", 80)
+  val pageWidth = IntSetting("-pagewidth", "Set page width", 160)
   val strict = BooleanSetting("-strict", "Use strict type rules, which means some formerly legal code does not typecheck anymore.")
   val language = MultiStringSetting("-language", "feature", "Enable one or more language features.")
   val rewrite = OptionSetting[Rewrites]("-rewrite", "When used in conjunction with -language:Scala2 rewrites sources to migrate to new syntax")
