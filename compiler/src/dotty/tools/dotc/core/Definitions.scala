@@ -990,6 +990,9 @@ class Definitions {
   /** If the symbol is of the class scala.Phantom.Any or scala.Phantom.Nothing */
   def isPhantomTerminalClass(sym: Symbol) = (sym eq Phantom_AnyClass) || (sym eq Phantom_NothingClass)
 
+  /** If the symbol is a Phantom.assume (including inlined Phantom.assume). */
+  def isPhantom_assume(sym: Symbol)(implicit ctx: Context): Boolean =
+    (sym eq Phantom_assume) || sym.name.is(NameKinds.InlineAssumeName)
 
   lazy val ErasedPhantomType: TypeRef = ctx.requiredClassRef("dotty.runtime.ErasedPhantom")
   def ErasedPhantomClass(implicit ctx: Context) = ErasedPhantomType.symbol.asClass

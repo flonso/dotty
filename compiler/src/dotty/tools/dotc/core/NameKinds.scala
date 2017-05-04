@@ -269,6 +269,7 @@ object NameKinds {
 
   /** Other unique names */
   val InlineAccessorName      = new UniqueNameKind("$_inlineAccessor_$")
+  val InlineAssumeName        = new UniqueNameKind("$_inlineAssume_$")
   val TempResultName          = new UniqueNameKind("ev$")
   val EvidenceParamName       = new UniqueNameKind("evidence$")
   val DepParamName            = new UniqueNameKind("(param)")
