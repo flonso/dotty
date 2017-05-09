@@ -154,7 +154,7 @@ object NameOps {
       }
     }
 
-    /** Is a synthetic function name
+    /** Is a function name
      *    - N for FunctionN
      *    - N for ImplicitFunctionN
       *   - (-1) otherwise
@@ -175,14 +175,14 @@ object NameOps {
      */
     def isImplicitFunction: Boolean = functionArityFor(str.ImplicitFunction) >= 0
 
-    /** Is a synthetic function name
+    /** Is a synthetic function name (in scala package)
      *    - FunctionN for N > 22
      *    - ImplicitFunctionN for N >= 0
      *    - false otherwise
      */
-    def isSyntheticFunction: Boolean = {
+    def isSyntheticScalaFunction: Boolean = {
       functionArityFor(str.Function) > MaxImplementedFunctionArity ||
-        functionArityFor(str.ImplicitFunction) >= 0
+      functionArityFor(str.ImplicitFunction) >= 0
     }
 
     /** Parsed function arity for function with some specific prefix */
