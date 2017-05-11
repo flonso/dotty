@@ -207,14 +207,16 @@ class GenBCodePipeline(val entryPoints: List[Symbol], val int: DottyBackendInter
             val store = if (mirrorC ne null) mirrorC else plainC
             store.visitAttribute(dataAttr)
             val outTastyFile = getFileForClassfile(outF, store.name, ".tasty").file
-            if (ctx.settings.emitTasty.value) {
-              val fos = new FileOutputStream(outTastyFile, false)
-              fos.write(binary)
-              fos.close()
-            } else {
-              // Create an empty file to signal that a tasty section exist in the corresponding .class
-              // This is much cheaper and simpler to check than doing classfile parsing
-              outTastyFile.createNewFile()
+            if (outTastyFile != null) {
+              if (ctx.settings.emitTasty.value) {
+                val fos = new FileOutputStream(outTastyFile, false)
+                fos.write(binary)
+                fos.close()
+              } else {
+                // Create an empty file to signal that a tasty section exist in the corresponding .class
+                // This is much cheaper and simpler to check than doing classfile parsing
+                outTastyFile.createNewFile()
+              }
             }
           }
 

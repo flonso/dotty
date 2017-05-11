@@ -668,6 +668,14 @@ object Types {
       buf
     }
 
+    /** The set of members of this type accessible within a given boundary. */
+    final def accessibleMembers(boundary: Symbol, whyNot: StringBuffer = null)(implicit ctx: Context): Seq[SingleDenotation] = track("allMembers") {
+      val boundaryCtx = ctx.withOwner(boundary)
+      memberDenots(takeAllFilter, (name, buf) =>
+        buf ++= member(name).alternatives.filter(_.symbol.isAccessibleFrom(this, whyNot = whyNot)(boundaryCtx))
+      )
+    }
+
     /** The set of abstract term members of this type. */
     final def abstractTermMembers(implicit ctx: Context): Seq[SingleDenotation] = track("abstractTermMembers") {
       memberDenots(abstractTermNameFilter,
