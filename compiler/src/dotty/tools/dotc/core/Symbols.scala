@@ -389,7 +389,36 @@ object Symbols {
 
     type ThisName <: Name
 
-    //assert(id != 4285)
+    //assert(id != 3548)
+
+    /** If this is a symbol for a top-level class, and if
+     *  `-Ykeep-trees` is set, return the tree for this class,
+     *  otherwise null.
+     */
+    def tree(implicit ctx: Context): Tree = {
+      if (unpickler != null && !denot.isAbsent) {
+        assert(myTree == null)
+
+        import ast.Trees._
+
+        def findTree(tree: ast.tpd.Tree): Option[ast.tpd.Tree] = tree match {
+          case PackageDef(_, stats) =>
+            stats.flatMap(findTree).headOption
+          case _ =>
+            if (tree.symbol eq this)
+              Some(tree)
+            else
+              None
+        }
+        val List(unpickledTree) = unpickler.body(ctx.addMode(Mode.ReadPositions))
+        unpickler = null
+
+        myTree = findTree(unpickledTree).get
+      }
+      myTree
+    }
+    private[dotc] var myTree: Tree = _
+    private[dotc] var unpickler: tasty.DottyUnpickler = _
 
     /** The last denotation of this symbol */
     private[this] var lastDenot: SymDenotation = _
