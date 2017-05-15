@@ -1,6 +1,6 @@
 Dotty is licensed under the [BSD 3-Clause License](http://opensource.org/licenses/BSD-3-Clause).
 
-Copyright (c) 2014, EPFL
+Copyright (c) 2014-2017, EPFL
 
 All rights reserved.
 
