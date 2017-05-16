@@ -2,13 +2,13 @@
 
 This is still very experimental. You can try it using the following steps.
 
-## Build the `ide-support` branch of Dotty
+## Build the `ide` branch of Dotty
 
 ```shell
 git clone --recursive http://github.com/lampepfl/dotty
 git remote add staging http://github.com/dotty-staging/dotty
 git fetch staging
-git checkout ide-support
+git checkout ide
 sbt ";sbt-dotty/publishLocal;dotty-bootstrapped/publishLocal"
 ```
 
