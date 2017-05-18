@@ -205,6 +205,8 @@ object Erasure extends TypeTestsCasts{
           val tree1 =
             if (tree.tpe isRef defn.NullClass)
               adaptToType(tree, underlying)
+            else if (wasPhantom(underlying))
+              PhantomErasure.erasedParameterRef
             else if (!(tree.tpe <:< tycon)) {
               assert(!(tree.tpe.typeSymbol.isPrimitiveValueClass))
               val nullTree = Literal(Constant(null))
