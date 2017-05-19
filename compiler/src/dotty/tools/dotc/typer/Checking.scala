@@ -548,6 +548,28 @@ trait Checking {
       tp
   }
 
+  /** Check that inline is only used on valid trees */
+  def checkInlineKeyword(tree: tpd.Tree)(implicit ctx: Context) = {
+    def errorOn(what: String) =
+      ctx.error("inlined keyword cannot be used on " + what, tree.pos)
+    val sym = tree.symbol
+    if (sym is Inline) {
+      tree match {
+        case _: TypeDef =>
+          if (!sym.isClass) errorOn("type")
+          else if (sym.is(Trait)) errorOn("trait")
+          else if (sym.is(Abstract)) errorOn("abstract class")
+          else errorOn("class") // Remove this to allow inline classes
+        case _: ValDef =>
+          if (sym.is(Module)) errorOn("object")
+          else if (sym.is(Mutable)) errorOn("var")
+          else if (sym.is(Lazy)) errorOn("lazy val")
+        case _ =>
+
+      }
+    }
+  }
+
   /** Check that `tree` is a pure expression of constant type */
   def checkInlineConformant(tree: Tree, what: => String)(implicit ctx: Context): Unit =
     tree.tpe match {

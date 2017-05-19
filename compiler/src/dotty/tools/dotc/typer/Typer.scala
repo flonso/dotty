@@ -1179,6 +1179,7 @@ class Typer extends Namer with TypeAssigner with Applications with Implicits wit
       case rhs => typedExpr(rhs, tpt1.tpe)
     }
     val vdef1 = assignType(cpy.ValDef(vdef)(name, tpt1, rhs1), sym)
+    checkInlineKeyword(vdef1)
     if (sym.is(Inline, butNot = DeferredOrParamAccessor))
       checkInlineConformant(rhs1, em"right-hand side of inline $sym")
     patchIfLazy(vdef1)
@@ -1261,7 +1262,9 @@ class Typer extends Namer with TypeAssigner with Applications with Implicits wit
       case rhs =>
         typedType(rhs)
     }
-    assignType(cpy.TypeDef(tdef)(name, rhs1), sym)
+    val tdef1 = assignType(cpy.TypeDef(tdef)(name, rhs1), sym)
+    checkInlineKeyword(tdef1)
+    tdef1
   }
 
   def typedClassDef(cdef: untpd.TypeDef, cls: ClassSymbol)(implicit ctx: Context) = track("typedClassDef") {
@@ -1340,6 +1343,8 @@ class Typer extends Namer with TypeAssigner with Applications with Implicits wit
 
     // check value class constraints
     checkDerivedValueClass(cls, body1)
+
+    checkInlineKeyword(cdef1)
 
     cdef1
 
