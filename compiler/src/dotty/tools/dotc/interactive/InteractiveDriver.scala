@@ -162,31 +162,32 @@ class InteractiveDriver(settings: List[String], val compiler: Compiler) extends 
       val sourceFile = new SourceFile(virtualFile, Codec.UTF8)
       myOpenFiles(uri) = sourceFile
 
+      val basePath = "/home/florian/Desktop/EPFL/Master/sav/project/stainless/"
       val stainlessLibraryFiles = List(
-                          """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/math/package.scala""",
-    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/proof/package.scala""",
-    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/proof/Internal.scala""",
-    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/io/FileOutputStream.scala""",
-    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/io/package.scala""",
-    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/io/StdIn.scala""",
-    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/io/FileInputStream.scala""",
-    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/io/StdOut.scala""",
-    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/annotation/isabelle.scala""",
-    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/annotation/package.scala""",
-    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/collection/List.scala""",
-    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/lang/Bag.scala""",
-    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/lang/StrOps.scala""",
-    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/lang/Map.scala""",
-    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/lang/Set.scala""",
-    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/lang/package.scala""",
-    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/lang/StaticChecks.scala""",
-    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/lang/Either.scala""",
-    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/lang/Option.scala""",
-    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/lang/Real.scala""",
-    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/lang/Rational.scala""",
-    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/lang/synthesis/Oracle.scala""",
-    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/lang/synthesis/package.scala""",
-    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/util/Random.scala"""
+                          basePath + """./frontends/library/stainless/math/package.scala""",
+                          basePath + """./frontends/library/stainless/proof/package.scala""",
+                          basePath + """./frontends/library/stainless/proof/Internal.scala""",
+                          basePath + """./frontends/library/stainless/io/FileOutputStream.scala""",
+                          basePath + """./frontends/library/stainless/io/package.scala""",
+                          basePath + """./frontends/library/stainless/io/StdIn.scala""",
+                          basePath + """./frontends/library/stainless/io/FileInputStream.scala""",
+                          basePath + """./frontends/library/stainless/io/StdOut.scala""",
+                          basePath + """./frontends/library/stainless/annotation/isabelle.scala""",
+                          basePath + """./frontends/library/stainless/annotation/package.scala""",
+                          basePath + """./frontends/library/stainless/collection/List.scala""",
+                          basePath + """./frontends/library/stainless/lang/Bag.scala""",
+                          basePath + """./frontends/library/stainless/lang/StrOps.scala""",
+                          basePath + """./frontends/library/stainless/lang/Map.scala""",
+                          basePath + """./frontends/library/stainless/lang/Set.scala""",
+                          basePath + """./frontends/library/stainless/lang/package.scala""",
+                          basePath + """./frontends/library/stainless/lang/StaticChecks.scala""",
+                          basePath + """./frontends/library/stainless/lang/Either.scala""",
+                          basePath + """./frontends/library/stainless/lang/Option.scala""",
+                          basePath + """./frontends/library/stainless/lang/Real.scala""",
+                          basePath + """./frontends/library/stainless/lang/Rational.scala""",
+                          basePath + """./frontends/library/stainless/lang/synthesis/Oracle.scala""",
+                          basePath + """./frontends/library/stainless/lang/synthesis/package.scala""",
+                          basePath + """./frontends/library/stainless/util/Random.scala"""
   ).map(x => new SourceFile(dotty.tools.io.AbstractFile.getFile(x), Codec.UTF8))
       run.compileSources( stainlessLibraryFiles ++ List(sourceFile))
       run.printSummary()
