@@ -40,7 +40,7 @@ import ast.Trees._
 case class SourceTree(source: SourceFile, tree: ast.tpd.Tree)
 
 /** A Driver subclass designed to be used from IDEs */
-class InteractiveDriver(settings: List[String]) extends Driver {
+class InteractiveDriver(settings: List[String], val compiler: Compiler) extends Driver {
   import ast.tpd._
   import InteractiveDriver._
 
@@ -149,8 +149,6 @@ class InteractiveDriver(settings: List[String]) extends Driver {
   private def newReporter: Reporter =
     new StoreReporter(null) with UniqueMessagePositions with HideNonSensicalMessages
 
-  private val compiler: Compiler = new InteractiveCompiler
-
   def run(uri: URI, sourceCode: String): List[MessageContainer] = {
     try {
       val reporter = newReporter
@@ -164,7 +162,33 @@ class InteractiveDriver(settings: List[String]) extends Driver {
       val sourceFile = new SourceFile(virtualFile, Codec.UTF8)
       myOpenFiles(uri) = sourceFile
 
-      run.compileSources(List(sourceFile))
+      val stainlessLibraryFiles = List(
+                          """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/math/package.scala""",
+    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/proof/package.scala""",
+    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/proof/Internal.scala""",
+    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/io/FileOutputStream.scala""",
+    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/io/package.scala""",
+    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/io/StdIn.scala""",
+    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/io/FileInputStream.scala""",
+    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/io/StdOut.scala""",
+    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/annotation/isabelle.scala""",
+    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/annotation/package.scala""",
+    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/collection/List.scala""",
+    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/lang/Bag.scala""",
+    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/lang/StrOps.scala""",
+    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/lang/Map.scala""",
+    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/lang/Set.scala""",
+    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/lang/package.scala""",
+    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/lang/StaticChecks.scala""",
+    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/lang/Either.scala""",
+    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/lang/Option.scala""",
+    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/lang/Real.scala""",
+    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/lang/Rational.scala""",
+    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/lang/synthesis/Oracle.scala""",
+    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/lang/synthesis/package.scala""",
+    """/home/florian/Desktop/EPFL/Master/sav/project/stainless/./frontends/library/stainless/util/Random.scala"""
+  ).map(x => new SourceFile(dotty.tools.io.AbstractFile.getFile(x), Codec.UTF8))
+      run.compileSources( stainlessLibraryFiles ++ List(sourceFile))
       run.printSummary()
       val t = run.units.head.tpdTree
       openClasses(uri) = topLevelClassNames(t)

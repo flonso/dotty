@@ -110,8 +110,11 @@ class ScalaLanguageServer extends LanguageServer with LanguageClientAware { this
     CompletableFuture.completedFuture(new Object)
   }
 
+  import java.util.function.Function
+
   def computeAsync[R](fun: CancelChecker => R): CompletableFuture[R] =
-    CompletableFutures.computeAsync({(cancelToken: CancelChecker) =>
+    CompletableFutures.computeAsync(new Function[CancelChecker, R] {
+      def apply(cancelToken: CancelChecker) =
       // We do not support any concurrent use of the compiler currently.
       thisServer.synchronized {
         cancelToken.checkCanceled()
@@ -134,7 +137,16 @@ class ScalaLanguageServer extends LanguageServer with LanguageClientAware { this
 
     val defaultFlags = List(/*"-Yplain-printer","-Yprintpos"*/)
     for (config <- configs) {
-      drivers.put(config, new InteractiveDriver(defaultFlags ++ config.scalacArgs.toList ++ List("-classpath", (config.target +: config.depCp).mkString(":"))))
+
+      import stainless.frontends.dotc._
+      import inox._
+      import inox.utils._
+
+      val inoxReporter = new DefaultReporter(immutable.Set[DebugSection]())
+      val inoxCtx = new inox.Context(inoxReporter, new InterruptManager(inoxReporter))
+      val stainlessCompiler = new DottyCompiler(inoxCtx)
+
+      drivers.put(config, new InteractiveDriver(defaultFlags ++ config.scalacArgs.toList ++ List("-classpath", (config.target +: config.depCp).mkString(":")), stainlessCompiler))
     }
 
 
@@ -200,6 +212,8 @@ class ScalaLanguageServer extends LanguageServer with LanguageClientAware { this
 
       val diags = driver.run(uri, text)
 
+      // extraction (getting the info from the compiler)
+      // Call stainless verification here cf MainHelpers
 
       client.publishDiagnostics(new PublishDiagnosticsParams(
         document.getUri,
@@ -219,6 +233,7 @@ class ScalaLanguageServer extends LanguageServer with LanguageClientAware { this
       val text = params.getTextDocument.getText
 
       val diags = driver.run(uri, text)
+      // Call stainless verification here
 
       client.publishDiagnostics(new PublishDiagnosticsParams(
         document.getUri,

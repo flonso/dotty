@@ -68,7 +68,8 @@ function fetchAndRun(version: String) {
         "-jar", coursierPath,
         "fetch",
         "-p",
-        "ch.epfl.lamp:dotty-language-server_0.1:" + version
+        "-r", "ivy2Cache",
+        "ch.epfl.lamp:dotty-language-server_2.11:" + version + "-nonbootstrapped"
       ])
     let coursierProc = coursierPromise.childProcess
 

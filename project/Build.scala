@@ -209,7 +209,7 @@ object Build {
   // This means that we need to provide dummy artefacts for these projects,
   // otherwise users will get compilation errors if they happen to transitively
   // depend on one of these projects.
-  lazy val commonDummySettings = commonBootstrappedSettings ++ Seq(
+  lazy val commonDummySettings = commonNonBootstrappedSettings ++ Seq(
     crossPaths := false,
     libraryDependencies := Seq()
   )
@@ -229,7 +229,8 @@ object Build {
   //   this is only necessary for compatibility with sbt which currently hardcodes the "dotty" artifact name
   lazy val dotty = project.in(file(".")).
     // FIXME: we do not aggregate `bin` because its tests delete jars, thus breaking other tests
-    aggregate(`dotty-interfaces`, `dotty-library`, `dotty-compiler`, `dotty-doc`, dottySbtBridgeRef).
+    aggregate(`dotty-interfaces`, `dotty-library`, `dotty-compiler`, `dotty-doc`, dottySbtBridgeRef, `dotty-language-server`,
+      `scala-library`, `scala-compiler`, `scala-reflect`, scalap).
     dependsOn(`dotty-compiler`).
     dependsOn(`dotty-library`).
     settings(commonNonBootstrappedSettings).
@@ -245,9 +246,7 @@ object Build {
   // Same as `dotty` but using bootstrapped projects.
   lazy val `dotty-bootstrapped` = project.
     aggregate(`dotty-interfaces`, `dotty-library-bootstrapped`, `dotty-compiler-bootstrapped`, `dotty-doc-bootstrapped`,
-      `dotty-language-server`,
-      dottySbtBridgeBootstrappedRef,
-      `scala-library`, `scala-compiler`, `scala-reflect`, scalap).
+      dottySbtBridgeBootstrappedRef).
     dependsOn(`dotty-compiler-bootstrapped`).
     dependsOn(`dotty-library-bootstrapped`).
     settings(commonBootstrappedSettings)
@@ -751,8 +750,8 @@ object DottyInjectedPlugin extends AutoPlugin {
     )
 
   lazy val `dotty-language-server` = project.in(file("language-server")).
-    dependsOn(`dotty-compiler-bootstrapped`).
-    settings(commonBootstrappedSettings).
+    dependsOn(`dotty-compiler`).
+    settings(commonNonBootstrappedSettings).
     settings(
       // Sources representing the shared configuration file used to communicate between the sbt-dotty
       // plugin and the language server
@@ -763,9 +762,10 @@ object DottyInjectedPlugin extends AutoPlugin {
       fork in run := true,
       libraryDependencies ++= Seq(
         "org.eclipse.lsp4j" % "org.eclipse.lsp4j" % "0.2.0.M7",
+        "ch.epfl.lara" % "stainless-dotty_2.11" % "0.1",
         Deps.`jackson-databind`
       ),
-      javaOptions := (javaOptions in `dotty-compiler-bootstrapped`).value,
+      javaOptions := (javaOptions in `dotty-compiler`).value,
 
       run := Def.inputTaskDyn {
         val inputArgs = spaceDelimited("<arg>").parsed
@@ -871,7 +871,7 @@ object DottyInjectedPlugin extends AutoPlugin {
   // Depend on dotty-library so that sbt projects using dotty automatically
   // depend on the dotty-library
   lazy val `scala-library` = project.
-    dependsOn(`dotty-library-bootstrapped`).
+    dependsOn(`dotty-library`).
     settings(commonDummySettings).
     settings(
       // Need a direct dependency on the real scala-library even though we indirectly
