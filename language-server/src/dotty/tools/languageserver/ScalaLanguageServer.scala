@@ -54,9 +54,14 @@ class ScalaLanguageServer extends LanguageServer with LanguageClientAware { this
   import ScalaLanguageServer._
   import InteractiveDriver._
 
+  import stainless.frontends.dotc._
+  import inox._
+  import inox.utils._
+
   var rewrites: dotty.tools.dotc.rewrite.Rewrites = _
 
   val drivers = new mutable.HashMap[IDEConfig, InteractiveDriver]
+  val reporters = new mutable.HashMap[InteractiveDriver, DefaultReporter]
 
   var classPath: String = _
   var target: String = _
@@ -137,16 +142,14 @@ class ScalaLanguageServer extends LanguageServer with LanguageClientAware { this
 
     val defaultFlags = List(/*"-Yplain-printer","-Yprintpos"*/)
     for (config <- configs) {
-
-      import stainless.frontends.dotc._
-      import inox._
-      import inox.utils._
-
-      val inoxReporter = new DefaultReporter(immutable.Set[DebugSection]())
-      val inoxCtx = new inox.Context(inoxReporter, new InterruptManager(inoxReporter))
+      val reporter = new DefaultReporter(immutable.Set[DebugSection]())
+      val inoxCtx = new inox.Context(reporter, new InterruptManager(reporter))
       val stainlessCompiler = new DottyCompiler(inoxCtx)
+      val driver = new InteractiveDriver(defaultFlags ++ config.scalacArgs.toList ++ List("-classpath", (config.target +: config.depCp).mkString(":")),
+                                         stainlessCompiler)
 
-      drivers.put(config, new InteractiveDriver(defaultFlags ++ config.scalacArgs.toList ++ List("-classpath", (config.target +: config.depCp).mkString(":")), stainlessCompiler))
+      drivers.put(config, driver)
+      reporters.put(driver, reporter)
     }
 
 
@@ -211,6 +214,8 @@ class ScalaLanguageServer extends LanguageServer with LanguageClientAware { this
       val text = change.getText
 
       val diags = driver.run(uri, text)
+
+      reporters.getOrElse(driver, null).info("REPLACE ME BY THE STAINLESS VERIFICATION")
 
       // extraction (getting the info from the compiler)
       // Call stainless verification here cf MainHelpers
