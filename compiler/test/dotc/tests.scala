@@ -68,8 +68,8 @@ class tests extends CompilerTest {
   }
 
   implicit val defaultOptions: List[String] = noCheckOptions ++ {
-    if (dotty.Properties.isRunByDrone) List("-Ycheck:tailrec,resolveSuper,mixin,restoreScopes,labelDef") // should be Ycheck:all, but #725
-    else List("-Ycheck:tailrec,resolveSuper,mixin,restoreScopes,labelDef")
+    if (dotty.Properties.isRunByDrone) List("-Ycheck:tailrec,resolveSuper,mixin,restoreScopes,labelDef,simplify") // should be Ycheck:all, but #725
+    else List("-Ycheck:tailrec,resolveSuper,mixin,restoreScopes,labelDef,simplify")
   } ++ checkOptions ++ classPath
 
   val testPickling = List("-Xprint-types", "-Ytest-pickler", "-Ystop-after:pickler", "-Yprintpos")
@@ -105,7 +105,7 @@ class tests extends CompilerTest {
   val libDir = "../library/src/"
 
   def dottyBootedLib = compileDir(libDir, ".", List("-deep", "-Ycheck-reentrant", "-strict") ::: defaultOptions)(allowDeepSubtypes) // note the -deep argument
-  def dottyDependsOnBootedLib = compileDir(dottyDir, ".", List("-deep", "-Ycheck-reentrant", "-strict") ::: defaultOptions)(allowDeepSubtypes) // note the -deep argument
+  def dottyDependsOnBootedLib = compileDir(dottyDir, ".", List("-deep", "-Ycheck-reentrant") ::: defaultOptions)(allowDeepSubtypes) // note the -deep argument
 
   @Before def cleanup(): Unit = {
     // remove class files from stdlib and tests compilation

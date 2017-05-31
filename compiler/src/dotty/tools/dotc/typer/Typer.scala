@@ -244,11 +244,21 @@ class Typer extends Namer with TypeAssigner with Applications with Implicits wit
         else {
           var result: Type = NoType
 
-          // find definition
-          if ((lastCtx eq ctx) || (ctx.scope ne lastCtx.scope) || (ctx.owner ne lastCtx.owner)) {
+          val curOwner = ctx.owner
+
+          // Can this scope contain new definitions? This is usually the first
+          // context where either the scope or the owner changes wrt the
+          // context immediately nested in it. But for package contexts, it's
+          // the opposite: the last context before the package changes. This distinction
+          // is made so that top-level imports following a package clause are
+          // logically nested in that package clause.
+          val isNewDefScope =
+            if (curOwner is Package) curOwner ne ctx.outer.owner
+            else (ctx.scope ne lastCtx.scope) || (curOwner ne lastCtx.owner)
+
+          if (isNewDefScope) {
             val defDenot = ctx.denotNamed(name)
             if (qualifies(defDenot)) {
-              val curOwner = ctx.owner
               val found =
                 if (isSelfDenot(defDenot)) curOwner.enclosingClass.thisType
                 else curOwner.thisType.select(name, defDenot)
@@ -297,7 +307,7 @@ class Typer extends Namer with TypeAssigner with Applications with Implicits wit
       }
 
       // begin findRef
-      loop(ctx)(ctx)
+      loop(NoContext)(ctx)
     }
 
     // begin typedIdent
@@ -443,13 +453,19 @@ class Typer extends Namer with TypeAssigner with Applications with Implicits wit
     tree.tpt match {
       case templ: untpd.Template =>
         import untpd._
-        templ.parents foreach {
+        var templ1 = templ
+        def isEligible(tp: Type) = tp.exists && !tp.typeSymbol.is(Final)
+        if (templ1.parents.isEmpty &&
+            isFullyDefined(pt, ForceDegree.noBottom) &&
+            isEligible(pt.underlyingClassRef(refinementOK = false)))
+          templ1 = cpy.Template(templ)(parents = untpd.TypeTree(pt) :: Nil)
+        templ1.parents foreach {
           case parent: RefTree =>
             typedAheadImpl(parent, tree => inferTypeParams(typedType(tree), pt))
           case _ =>
         }
         val x = tpnme.ANON_CLASS
-        val clsDef = TypeDef(x, templ).withFlags(Final)
+        val clsDef = TypeDef(x, templ1).withFlags(Final)
         typed(cpy.Block(tree)(clsDef :: Nil, New(Ident(x), Nil)), pt)
       case _ =>
         var tpt1 = typedType(tree.tpt)
@@ -484,7 +500,7 @@ class Typer extends Namer with TypeAssigner with Applications with Implicits wit
         if (id.name == nme.WILDCARD || id.name == nme.WILDCARD_STAR) ifPat
         else {
           import untpd._
-          typed(Bind(id.name, Typed(Ident(wildName), tree.tpt)).withPos(id.pos), pt)
+          typed(Bind(id.name, Typed(Ident(wildName), tree.tpt)).withPos(tree.pos), pt)
         }
       case _ => ifExpr
     }
@@ -1052,7 +1068,7 @@ class Typer extends Namer with TypeAssigner with Applications with Implicits wit
     val tpt1 = typed(tree.tpt, AnyTypeConstructorProto)(ctx.retractMode(Mode.Pattern))
     val tparams = tpt1.tpe.typeParams
     if (tparams.isEmpty) {
-      ctx.error(ex"${tpt1.tpe} does not take type parameters", tree.pos)
+      ctx.error(TypeDoesNotTakeParameters(tpt1.tpe, tree.args), tree.pos)
       tpt1
     }
     else {
@@ -1286,7 +1302,7 @@ class Typer extends Namer with TypeAssigner with Applications with Implicits wit
       case cinfo: MethodType =>
         if (!ctx.erasedTypes) { // after constructors arguments are passed in super call.
           typr.println(i"constr type: $cinfo")
-          ctx.error(em"parameterized $psym lacks argument list", ref.pos)
+          ctx.error(ParameterizedTypeLacksArguments(psym), ref.pos)
         }
         ref
       case _ =>
@@ -1310,50 +1326,72 @@ class Typer extends Namer with TypeAssigner with Applications with Implicits wit
         result
       }
 
+    /** Checks if one of the decls is a type with the same name as class type member in selfType */
+    def classExistsOnSelf(decls: Scope, self: tpd.ValDef): Boolean = {
+      val selfType = self.tpt.tpe
+      if (!selfType.exists || (selfType.classSymbol eq cls)) false
+      else {
+        def memberInSelfButNotThis(decl: Symbol) =
+          selfType.member(decl.name).symbol.filter(other => other.isClass && other.owner != cls)
+        decls.iterator.filter(_.isType).foldLeft(false) { (foundRedef, decl) =>
+          val other = memberInSelfButNotThis(decl)
+          if (other.exists) {
+            val msg = CannotHaveSameNameAs(decl, other, CannotHaveSameNameAs.DefinedInSelf(self))
+            ctx.error(msg, decl.pos)
+          }
+          foundRedef || other.exists
+        }
+      }
+    }
+
     completeAnnotations(cdef, cls)
     val constr1 = typed(constr).asInstanceOf[DefDef]
     val parentsWithClass = ensureFirstIsClass(parents mapconserve typedParent, cdef.namePos)
     val parents1 = ensureConstrCall(cls, parentsWithClass)(superCtx)
     val self1 = typed(self)(ctx.outer).asInstanceOf[ValDef] // outer context where class members are not visible
-    val dummy = localDummy(cls, impl)
-    val body1 = typedStats(impl.body, dummy)(inClassContext(self1.symbol))
-    cls.setNoInitsFlags((NoInitsInterface /: body1)((fs, stat) => fs & defKind(stat)))
+    if (self1.tpt.tpe.isError || classExistsOnSelf(cls.unforcedDecls, self1)) {
+      // fail fast to avoid typing the body with an error type
+      cdef.withType(UnspecifiedErrorType)
+    } else {
+      val dummy = localDummy(cls, impl)
+      val body1 = typedStats(impl.body, dummy)(inClassContext(self1.symbol))
+      cls.setNoInitsFlags((NoInitsInterface /: body1) ((fs, stat) => fs & defKind(stat)))
 
-    // Expand comments and type usecases
-    cookComments(body1.map(_.symbol), self1.symbol)(localContext(cdef, cls).setNewScope)
+      // Expand comments and type usecases
+      cookComments(body1.map(_.symbol), self1.symbol)(localContext(cdef, cls).setNewScope)
 
-    checkNoDoubleDefs(cls)
-    val impl1 = cpy.Template(impl)(constr1, parents1, self1, body1)
-      .withType(dummy.nonMemberTermRef)
-    checkVariance(impl1)
-    if (!cls.is(AbstractOrTrait) && !ctx.isAfterTyper) checkRealizableBounds(cls.typeRef, cdef.namePos)
-    val cdef1 = assignType(cpy.TypeDef(cdef)(name, impl1), cls)
-    if (ctx.phase.isTyper && cdef1.tpe.derivesFrom(defn.DynamicClass) && !ctx.dynamicsEnabled) {
-      val isRequired = parents1.exists(_.tpe.isRef(defn.DynamicClass))
-      ctx.featureWarning(nme.dynamics.toString, "extension of type scala.Dynamic", isScala2Feature = true,
+      checkNoDoubleDefs(cls)
+      val impl1 = cpy.Template(impl)(constr1, parents1, self1, body1)
+        .withType(dummy.nonMemberTermRef)
+      checkVariance(impl1)
+      if (!cls.is(AbstractOrTrait) && !ctx.isAfterTyper) checkRealizableBounds(cls.typeRef, cdef.namePos)
+      val cdef1 = assignType(cpy.TypeDef(cdef)(name, impl1), cls)
+      if (ctx.phase.isTyper && cdef1.tpe.derivesFrom(defn.DynamicClass) && !ctx.dynamicsEnabled) {
+        val isRequired = parents1.exists(_.tpe.isRef(defn.DynamicClass))
+        ctx.featureWarning(nme.dynamics.toString, "extension of type scala.Dynamic", isScala2Feature = true,
           cls, isRequired, cdef.pos)
+      }
+
+      // Check that phantom lattices are defined in a static object
+      if (cls.classParents.exists(_.classSymbol eq defn.PhantomClass) && !cls.isStaticOwner)
+        ctx.error("only static objects can extend scala.Phantom", cdef.pos)
+
+      // check value class constraints
+      checkDerivedValueClass(cls, body1)
+
+      if (ctx.settings.YretainTrees.value) {
+        cls.myTree = cdef1
+      }
+      cdef1
+
+      // todo later: check that
+      //  1. If class is non-abstract, it is instantiatable:
+      //  - self type is s supertype of own type
+      //  - all type members have consistent bounds
+      // 2. all private type members have consistent bounds
+      // 3. Types do not override classes.
+      // 4. Polymorphic type defs override nothing.
     }
-
-    // Check that phantom lattices are defined in a static object
-    if (cls.classParents.exists(_.classSymbol eq defn.PhantomClass) && !cls.isStaticOwner)
-      ctx.error("only static objects can extend scala.Phantom", cdef.pos)
-
-    // check value class constraints
-    checkDerivedValueClass(cls, body1)
-
-    //println(s"Tree for $cls [${cls.validFor}]: $cdef1")
-    if (ctx.settings.YretainTrees.value) {
-      cls.myTree = cdef1
-    }
-    cdef1
-
-    // todo later: check that
-    //  1. If class is non-abstract, it is instantiatable:
-    //  - self type is s supertype of own type
-    //  - all type members have consistent bounds
-    // 2. all private type members have consistent bounds
-    // 3. Types do not override classes.
-    // 4. Polymorphic type defs override nothing.
   }
 
   /** Ensure that the first type in a list of parent types Ps points to a non-trait class.
@@ -1915,11 +1953,7 @@ class Typer extends Namer with TypeAssigner with Applications with Implicits wit
           }
           else adapt(tpd.Apply(tree, args), pt)
         }
-        if ((pt eq WildcardType) || original.isEmpty) addImplicitArgs(argCtx(tree))
-        else
-          ctx.typerState.tryWithFallback(addImplicitArgs(argCtx(tree))) {
-            adapt(typed(original, WildcardType), pt, EmptyTree)
-          }
+        addImplicitArgs(argCtx(tree))
       case wtp: MethodType if !pt.isInstanceOf[SingletonType] =>
         // Follow proxies and approximate type paramrefs by their upper bound
         // in the current constraint in order to figure out robustly
@@ -1962,7 +1996,8 @@ class Typer extends Namer with TypeAssigner with Applications with Implicits wit
             case _: RefTree | _: Literal
             if !isVarPattern(tree) &&
                !(tree.tpe <:< pt)(ctx.addMode(Mode.GADTflexible)) =>
-              checkCanEqual(pt, wtp, tree.pos)(ctx.retractMode(Mode.Pattern))
+              val tp1 :: tp2 :: Nil = harmonizeTypes(pt :: wtp :: Nil)
+              checkCanEqual(tp1, tp2, tree.pos)(ctx.retractMode(Mode.Pattern))
             case _ =>
           }
           tree

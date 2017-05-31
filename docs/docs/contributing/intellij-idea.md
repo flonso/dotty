@@ -8,7 +8,7 @@ Setup
 
 You can setup IntelliJ [IDEA >= 2016.1](https://www.jetbrains.com/idea/nextversion) to run Dotty.
 
-Assuming you have cloned dotty's repository from Github (and run `sbt managedSources` as described in [Getting Started](getting-started.md)),
+Assuming you have cloned Dotty's repository from Github (and run `sbt managedSources` as described in [Getting Started](getting-started.md)),
 you can now proceed with importing it to IDEA by selecting the
 corresponding option from the startup menu. Navigate on the corresponding directory and select it. Next, you need
 to select the model of the import and as the screenshot shows, select SBT.
@@ -35,7 +35,7 @@ For the first option you can fire up sbt from the `Terminal` window of IDEA or y
 For example, to run a test you can write with or without flags:
 
 ```shell
-dotc tests/pos/Arrays.scala
+$ dotc tests/pos/Arrays.scala
 ```
 
 If you are interested in debugging the compiler you can enable the necessary agent on the JVM.
@@ -57,5 +57,3 @@ Now every time you run `dotc` you can set your breakpoints and hit the `Debug do
  the sample configuration above). The default data on the configuration match the enabled agent on the VM so, probably,
  you will not need to change anything else.
  
-To contribute to dotty please follow the [Dotty Developer Guidelines](https://github.com/lampepfl/dotty/blob/master/CONTRIBUTING.md).
-                                         

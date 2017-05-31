@@ -11,16 +11,6 @@ import { Executable, LanguageClient, LanguageClientOptions, SettingMonitor, Serv
 import * as lc from 'vscode-languageclient';
 import * as vscode from 'vscode';
 
-// Keep in sync with IDEConfig.java
-interface IDEConfig {
-  id: string,
-  scalaVersion: string,
-  sources: string[],
-  scalacArgs: string[],
-  depCp: string[],
-  target: string
-}
-
 let extensionContext: ExtensionContext
 let outputChannel: vscode.OutputChannel
 
@@ -28,13 +18,13 @@ export function activate(context: ExtensionContext) {
   extensionContext = context
   outputChannel = vscode.window.createOutputChannel('Dotty Language Client');
 
-  let versionFile = `${vscode.workspace.rootPath}/.dotty-ide-version`
-  fs.readFile(versionFile, (err, data) => {
+  const artifactFile = `${vscode.workspace.rootPath}/.dotty-ide-artifact`
+  fs.readFile(artifactFile, (err, data) => {
     if (err) {
-      outputChannel.append(`Unable to parse ${versionFile}`)
+      outputChannel.append(`Unable to parse ${artifactFile}`)
       throw err
     }
-    let version = data.toString().trim()
+    const artifact = data.toString().trim()
 
     if (process.env['DLS_DEV_MODE']) {
       const portFile = `${vscode.workspace.rootPath}/.dotty-ide-dev-port`
@@ -50,28 +40,28 @@ export function activate(context: ExtensionContext) {
         })
       })
     } else {
-      fetchAndRun(version)
+      fetchAndRun(artifact)
     }
   })
 }
 
-function fetchAndRun(version: String) {
-  let coursierPath = path.join(extensionContext.extensionPath, './out/coursier');
+function fetchAndRun(artifact: String) {
+  const coursierPath = path.join(extensionContext.extensionPath, './out/coursier');
 
   vscode.window.withProgress({
     location: vscode.ProgressLocation.Window,
     title: 'Fetching the Dotty Language Server'
   }, (progress) => {
 
-    let coursierPromise =
+    const coursierPromise =
       cpp.spawn("java", [
         "-jar", coursierPath,
         "fetch",
         "-p",
         "-r", "ivy2Cache",
-        "ch.epfl.lamp:dotty-language-server_2.11:" + version + "-nonbootstrapped"
+        artifact
       ])
-    let coursierProc = coursierPromise.childProcess
+    const coursierProc = coursierPromise.childProcess
 
     let classPath = ""
 
@@ -100,7 +90,7 @@ function fetchAndRun(version: String) {
 }
 
 function run(serverOptions: ServerOptions) {
-  let clientOptions: LanguageClientOptions = {
+  const clientOptions: LanguageClientOptions = {
     documentSelector: ['scala'],
     synchronize: {
       configurationSection: 'dotty'
@@ -109,15 +99,10 @@ function run(serverOptions: ServerOptions) {
 
   outputChannel.dispose()
 
-  let client = new LanguageClient('dotty', 'Dotty Language Server', serverOptions, clientOptions);
+  const client = new LanguageClient('dotty', 'Dotty Language Server', serverOptions, clientOptions);
 
   // Push the disposable to the context's subscriptions so that the
   // client can be deactivated on extension deactivation
   extensionContext.subscriptions.push(client.start());
-
-  commands.registerCommand("dotty.fix", (uri: string, range: lc.Range, replacement: string) => {
-    let edit = new vscode.WorkspaceEdit();
-    edit.replace(Uri.parse(uri), client.protocol2CodeConverter.asRange(range), replacement);
-    return vscode.workspace.applyEdit(edit);
-  });
+  
 }

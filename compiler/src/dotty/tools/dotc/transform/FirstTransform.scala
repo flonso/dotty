@@ -42,6 +42,8 @@ class FirstTransform extends MiniPhaseTransform with InfoTransformer with Annota
 
   private var addCompanionPhases: List[NeedsCompanions] = _
 
+  override def changesMembers = true // the phase adds companion objects
+
   def needsCompanion(cls: ClassSymbol)(implicit ctx: Context) =
     addCompanionPhases.exists(_.isCompanionNeeded(cls))
 
@@ -159,6 +161,14 @@ class FirstTransform extends MiniPhaseTransform with InfoTransformer with Annota
         _ => ref(defn.Sys_errorR).withPos(ddef.pos)
           .appliedTo(Literal(Constant("native method stub"))))
     } else ddef
+  }
+
+  override def transformValDef(vdef: tpd.ValDef)(implicit ctx: Context, info: TransformerInfo): tpd.Tree = {
+    if (vdef.tpt.tpe.isPhantom) {
+      if (vdef.symbol.is(Mutable)) ctx.error("var fields cannot have Phantom types", vdef.pos)
+      else if (vdef.symbol.hasAnnotation(defn.VolatileAnnot)) ctx.error("Phantom fields cannot be @volatile", vdef.pos)
+    }
+    vdef
   }
 
   override def transformStats(trees: List[Tree])(implicit ctx: Context, info: TransformerInfo): List[Tree] =

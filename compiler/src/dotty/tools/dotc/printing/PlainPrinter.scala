@@ -53,7 +53,10 @@ class PlainPrinter(_ctx: Context) extends Printer {
         case AndType(tp1, tp2) =>
           homogenize(tp1) & homogenize(tp2)
         case OrType(tp1, tp2) =>
-          homogenize(tp1) | homogenize(tp2)
+          if (tp1.show > tp2.show)
+            homogenize(tp1) | homogenize(tp2)
+          else
+            homogenize(tp2) | homogenize(tp1)
         case tp: SkolemType =>
           homogenize(tp.info)
         case tp: LazyRef =>
@@ -193,7 +196,8 @@ class PlainPrinter(_ctx: Context) extends Printer {
           val bounds =
             if (constr.contains(tp)) constr.fullBounds(tp.origin)(ctx.addMode(Mode.Printing))
             else TypeBounds.empty
-          if (ctx.settings.YshowVarBounds.value) "(" ~ toText(tp.origin) ~ "?" ~ toText(bounds) ~ ")"
+          if (bounds.isAlias) toText(bounds.lo) ~ "^"
+          else if (ctx.settings.YshowVarBounds.value) "(" ~ toText(tp.origin) ~ "?" ~ toText(bounds) ~ ")"
           else toText(tp.origin)
         }
       case tp: LazyRef =>
@@ -487,9 +491,9 @@ class PlainPrinter(_ctx: Context) extends Printer {
   def toText(result: SearchResult): Text = result match {
     case result: SearchSuccess =>
       "SearchSuccess: " ~ toText(result.ref) ~ " via " ~ toText(result.tree)
-    case result: NonMatchingImplicit =>
+    case _: NonMatchingImplicit | NoImplicitMatches =>
       "NoImplicitMatches"
-    case result: DivergingImplicit =>
+    case _: DivergingImplicit | DivergingImplicit =>
       "Diverging Implicit"
     case result: ShadowedImplicit =>
       "Shadowed Implicit"
@@ -498,7 +502,7 @@ class PlainPrinter(_ctx: Context) extends Printer {
     case result: AmbiguousImplicits =>
       "Ambiguous Implicit: " ~ toText(result.alt1) ~ " and " ~ toText(result.alt2)
     case _ =>
-      "?Unknown Implicit Result?"
+      "?Unknown Implicit Result?" + result.getClass
   }
 
   def toText(importInfo: ImportInfo): Text = {

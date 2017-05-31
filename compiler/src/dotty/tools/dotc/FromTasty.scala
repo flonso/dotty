@@ -84,7 +84,7 @@ object FromTasty extends Driver {
             clsd.infoOrCompleter match {
               case info: ClassfileLoader =>
                 info.load(clsd)
-                val unpickled = clsd.symbol.tree
+                val unpickled = clsd.symbol.asClass.tree
                 if (unpickled != null) {
                     val unit1 = new CompilationUnit(new SourceFile(clsd.symbol.sourceFile, Seq()))
                     unit1.tpdTree = unpickled

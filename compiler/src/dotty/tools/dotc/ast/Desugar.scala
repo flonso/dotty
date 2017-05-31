@@ -72,9 +72,12 @@ object desugar {
             val defctx = ctx.outersIterator.dropWhile(_.scope eq ctx.scope).next
             var local = defctx.denotNamed(tp.name).suchThat(_ is ParamOrAccessor).symbol
             if (local.exists) (defctx.owner.thisType select local).dealias
-            else throw new java.lang.Error(
-              s"no matching symbol for ${tp.symbol.showLocated} in ${defctx.owner} / ${defctx.effectiveScope}"
-            )
+            else {
+              def msg =
+                s"no matching symbol for ${tp.symbol.showLocated} in ${defctx.owner} / ${defctx.effectiveScope}"
+              if (ctx.reporter.errorsReported) new ErrorType(msg)
+              else throw new java.lang.Error(msg)
+            }
           case _ =>
             mapOver(tp)
         }
@@ -124,7 +127,7 @@ object desugar {
     else vdef
   }
 
-  def makeImplicitParameters(tpts: List[Tree], forPrimaryConstructor: Boolean)(implicit ctx: Context) =
+  def makeImplicitParameters(tpts: List[Tree], forPrimaryConstructor: Boolean = false)(implicit ctx: Context) =
     for (tpt <- tpts) yield {
        val paramFlags: FlagSet = if (forPrimaryConstructor) PrivateLocalParamAccessor else Param
        val epname = EvidenceParamName.fresh()
@@ -265,7 +268,7 @@ object desugar {
     val mods = cdef.mods
     val companionMods = mods
         .withFlags((mods.flags & AccessFlags).toCommonFlags)
-        .withMods(mods.mods.filter(!_.isInstanceOf[Mod.EnumCase]))
+        .withMods(Nil)
 
     val (constr1, defaultGetters) = defDef(constr0, isPrimaryConstructor = true) match {
       case meth: DefDef => (meth, Nil)
@@ -291,23 +294,13 @@ object desugar {
 
     val isCaseClass  = mods.is(Case) && !mods.is(Module)
     val isCaseObject = mods.is(Case) && mods.is(Module)
-    val isEnum = mods.hasMod[Mod.Enum]
+    val isEnum = mods.hasMod[Mod.Enum] && !mods.is(Module)
     val isEnumCase = isLegalEnumCase(cdef)
     val isValueClass = parents.nonEmpty && isAnyVal(parents.head)
       // This is not watertight, but `extends AnyVal` will be replaced by `inline` later.
 
-    lazy val reconstitutedTypeParams = reconstitutedEnumTypeParams(cdef.pos.startPos)
 
-    val originalTparams =
-      if (isEnumCase && parents.isEmpty) {
-        if (constr1.tparams.nonEmpty) {
-          if (reconstitutedTypeParams.nonEmpty)
-            ctx.error(em"case with type parameters needs extends clause", constr1.tparams.head.pos)
-          constr1.tparams
-        }
-        else reconstitutedTypeParams
-      }
-      else constr1.tparams
+    val originalTparams = constr1.tparams
     val originalVparamss = constr1.vparamss
     val constrTparams = originalTparams.map(toDefParam)
     val constrVparamss =
@@ -328,25 +321,39 @@ object desugar {
       case stat =>
         stat
     }
+    def anyRef = ref(defn.AnyRefAlias.typeRef)
 
-    val derivedTparams =
-      if (isEnumCase) constrTparams else constrTparams map derivedTypeParam
+    val derivedTparams = constrTparams map derivedTypeParam
     val derivedVparamss = constrVparamss nestedMap derivedTermParam
     val arity = constrVparamss.head.length
 
     val classTycon: Tree = new TypeRefTree // watching is set at end of method
 
-    def appliedRef(tycon: Tree) =
-      (if (constrTparams.isEmpty) tycon
-       else AppliedTypeTree(tycon, constrTparams map refOfDef))
-       .withPos(cdef.pos.startPos)
+    def appliedTypeTree(tycon: Tree, args: List[Tree]) =
+      (if (args.isEmpty) tycon else AppliedTypeTree(tycon, args))
+        .withPos(cdef.pos.startPos)
+
+    def appliedRef(tycon: Tree, tparams: List[TypeDef] = constrTparams) =
+      appliedTypeTree(tycon, tparams map refOfDef)
 
     // a reference to the class type bound by `cdef`, with type parameters coming from the constructor
     val classTypeRef = appliedRef(classTycon)
-    // a reference to `enumClass`, with type parameters coming from the constructor
-    lazy val enumClassTypeRef =
-      if (reconstitutedTypeParams.isEmpty) enumClassRef
-      else appliedRef(enumClassRef)
+
+    // a reference to `enumClass`, with type parameters coming from the case constructor
+    lazy val enumClassTypeRef = enumClass.primaryConstructor.info match {
+      case info: PolyType =>
+        if (constrTparams.isEmpty)
+          interpolatedEnumParent(cdef.pos.startPos)
+        else if ((constrTparams.corresponds(info.paramNames))((param, name) => param.name == name))
+          appliedRef(enumClassRef)
+        else {
+          ctx.error(i"explicit extends clause needed because type parameters of case and enum class differ"
+              , cdef.pos.startPos)
+          appliedTypeTree(enumClassRef, constrTparams map (_ => anyRef))
+        }
+      case _ =>
+        enumClassRef
+    }
 
     // new C[Ts](paramss)
     lazy val creatorExpr = New(classTypeRef, constrVparamss nestedMap refOfDef)
@@ -399,8 +406,6 @@ object desugar {
       else Nil
     }
 
-    def anyRef = ref(defn.AnyRefAlias.typeRef)
-
     // Case classes and case objects get Product parents
     var parents1 = parents
     if (isEnumCase && parents.isEmpty)
@@ -410,6 +415,31 @@ object desugar {
     if (isEnum)
       parents1 = parents1 :+ ref(defn.EnumType)
 
+    // The Eq instance for an Enum class. For an enum class
+    //
+    //    enum class C[T1, ..., Tn]
+    //
+    // we generate:
+    //
+    //    implicit def eqInstance[T1$1, ..., Tn$1, T1$2, ..., Tn$2](implicit
+    //      ev1: Eq[T1$1, T1$2], ..., evn: Eq[Tn$1, Tn$2]])
+    //      : Eq[C[T1$1, ..., Tn$1], C[T1$2, ..., Tn$2]] = Eq
+    def eqInstance = {
+      def append(tdef: TypeDef, str: String) = cpy.TypeDef(tdef)(name = tdef.name ++ str)
+      val leftParams = derivedTparams.map(append(_, "$1"))
+      val rightParams = derivedTparams.map(append(_, "$2"))
+      val subInstances = (leftParams, rightParams).zipped.map((param1, param2) =>
+        appliedRef(ref(defn.EqType), List(param1, param2)))
+      DefDef(
+          name = nme.eqInstance,
+          tparams = leftParams ++ rightParams,
+          vparamss = List(makeImplicitParameters(subInstances)),
+          tpt = appliedTypeTree(ref(defn.EqType),
+              appliedRef(classTycon, leftParams) :: appliedRef(classTycon, rightParams) :: Nil),
+          rhs = ref(defn.EqModule.termRef)).withFlags(Synthetic | Implicit)
+    }
+    def eqInstances = if (isEnum) eqInstance :: Nil else Nil
+
     // The thicket which is the desugared version of the companion object
     //     synthetic object C extends parentTpt { defs }
     def companionDefs(parentTpt: Tree, defs: List[Tree]) =
@@ -418,6 +448,8 @@ object desugar {
           className.toTermName, Template(emptyConstructor, parentTpt :: Nil, EmptyValDef, defs))
             .withMods(companionMods | Synthetic))
       .withPos(cdef.pos).toList
+
+    val companionMeths = defaultGetters ::: eqInstances
 
     // The companion object definitions, if a companion is needed, Nil otherwise.
     // companion definitions include:
@@ -430,11 +462,18 @@ object desugar {
     // For all other classes, the parent is AnyRef.
     val companions =
       if (isCaseClass) {
+        def extractType(t: Tree): Tree = t match {
+          case Apply(t1, _) => extractType(t1)
+          case TypeApply(t1, ts) => AppliedTypeTree(extractType(t1), ts)
+          case Select(t1, nme.CONSTRUCTOR) => extractType(t1)
+          case New(t1) => t1
+          case t1 => t1
+        }
         // The return type of the `apply` method
         val applyResultTpt =
           if (isEnumCase)
             if (parents.isEmpty) enumClassTypeRef
-            else parents.reduceLeft(AndTypeTree)
+            else parents.map(extractType).reduceLeft(AndTypeTree)
           else TypeTree()
 
         val parent =
@@ -457,12 +496,16 @@ object desugar {
           DefDef(nme.unapply, derivedTparams, (unapplyParam :: Nil) :: Nil, TypeTree(), unapplyRHS)
             .withMods(synthetic)
         }
-        companionDefs(parent, applyMeths ::: unapplyMeth :: defaultGetters)
+        companionDefs(parent, applyMeths ::: unapplyMeth :: companionMeths)
       }
-      else if (defaultGetters.nonEmpty)
-        companionDefs(anyRef, defaultGetters)
-      else if (isValueClass)
-        companionDefs(anyRef, Nil)
+      else if (companionMeths.nonEmpty)
+        companionDefs(anyRef, companionMeths)
+      else if (isValueClass) {
+        constr0.vparamss match {
+          case List(_ :: Nil) => companionDefs(anyRef, Nil)
+          case _ => Nil // error will be emitted in typer
+        }
+      }
       else Nil
 
     // For an implicit class C[Ts](p11: T11, ..., p1N: T1N) ... (pM1: TM1, .., pMN: TMN), the method
@@ -543,7 +586,7 @@ object desugar {
       val clsRef = Ident(clsName)
       val modul = ValDef(moduleName, clsRef, New(clsRef, Nil))
         .withMods(mods | ModuleCreationFlags | mods.flags & AccessFlags)
-        .withPos(mdef.pos)
+        .withPos(mdef.pos.startPos)
       val ValDef(selfName, selfTpt, _) = impl.self
       val selfMods = impl.self.mods
       if (!selfTpt.isEmpty) ctx.error(ObjectMayNotHaveSelfType(mdef), impl.self.pos)
@@ -727,7 +770,7 @@ object desugar {
   }
 
   def makeImplicitFunction(formals: List[Type], body: Tree)(implicit ctx: Context): Tree = {
-    val params = makeImplicitParameters(formals.map(TypeTree), forPrimaryConstructor = false)
+    val params = makeImplicitParameters(formals.map(TypeTree))
     new ImplicitFunction(params, body)
   }
 
@@ -773,7 +816,7 @@ object desugar {
     /**    { label def lname(): Unit = rhs; call }
      */
     def labelDefAndCall(lname: TermName, rhs: Tree, call: Tree) = {
-      val ldef = DefDef(lname, Nil, ListOfNil, TypeTree(defn.UnitType), rhs).withFlags(Label)
+      val ldef = DefDef(lname, Nil, ListOfNil, TypeTree(defn.UnitType), rhs).withFlags(Label | Synthetic)
       Block(ldef, call)
     }
 
@@ -859,7 +902,7 @@ object desugar {
         case IdPattern(named, tpt) =>
           Function(derivedValDef(pat, named, tpt, EmptyTree, Modifiers(Param)) :: Nil, body)
         case _ =>
-          makeCaseLambda(CaseDef(pat, EmptyTree, body) :: Nil, unchecked = false)
+          makeCaseLambda(CaseDef(pat, EmptyTree, body) :: Nil)
       }
 
       /** If `pat` is not an Identifier, a Typed(Ident, _), or a Bind, wrap

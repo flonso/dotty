@@ -3,164 +3,181 @@ package dotc
 package interactive
 
 import java.net.URI
+import java.io._
 import java.nio.file._
+import java.nio.file.attribute.BasicFileAttributes
+import java.util.stream._
+import java.util.zip._
 import java.util.function._
-import java.util.concurrent.CompletableFuture
-
-import java.util.{List => jList}
-import java.util.ArrayList
-
-import dotty.tools.dotc._
-import dotty.tools.dotc.util._
-import dotty.tools.dotc.core.Contexts._
-import dotty.tools.dotc.core.SymDenotations._
-import dotty.tools.dotc.core._
-import dotty.tools.dotc.core.Types._
-import dotty.tools.dotc.core.tasty._
-import dotty.tools.dotc.{ Main => DottyMain }
-import dotty.tools.dotc.interfaces
-import dotty.tools.dotc.reporting._
-import dotty.tools.dotc.reporting.diagnostic._
-import dotty.tools.dotc.classpath.ClassPathEntries
 
 import scala.collection._
-import scala.collection.JavaConverters._
-
-import dotty.tools.FatalError
-import dotty.tools.io._
+import JavaConverters._
 import scala.io.Codec
-import dotty.tools.dotc.util.SourceFile
-import java.io._
 
-import Flags._, Symbols._, Names._, NameOps._
-import core.Decorators._
+import dotty.tools.io.{ ClassPath, ClassRepresentation, PlainFile, VirtualFile }
 
-import ast.Trees._
-
-case class SourceTree(source: SourceFile, tree: ast.tpd.Tree)
+import ast.{Trees, tpd}
+import core._, core.Decorators._
+import Contexts._, Flags._, Names._, NameOps._, Symbols._, SymDenotations._, Trees._, Types._
+import classpath._
+import reporting._, reporting.diagnostic.MessageContainer
+import util._
 
 /** A Driver subclass designed to be used from IDEs */
 class InteractiveDriver(settings: List[String], val compiler: Compiler) extends Driver {
-  import ast.tpd._
+  import tpd._
   import InteractiveDriver._
 
+  // FIXME: Change the Driver API to not require implementing this method
   override protected def newCompiler(implicit ctx: Context): Compiler = ???
   override def sourcesRequired = false
 
   private val myInitCtx: Context = {
     val rootCtx = initCtx.fresh.addMode(Mode.ReadPositions)
     rootCtx.setSetting(rootCtx.settings.YretainTrees, true)
-    setup(settings.toArray, rootCtx)._2
+    val ctx = setup(settings.toArray, rootCtx)._2
+    ctx.initialize()(ctx)
+    ctx
   }
 
   private var myCtx: Context = myInitCtx
 
-  implicit def ctx: Context = myCtx
+  def currentCtx: Context = myCtx
 
-  private val openClasses = new mutable.LinkedHashMap[URI, List[String]]
+  private val myOpenedFiles = new mutable.LinkedHashMap[URI, SourceFile]
+  private val myOpenedTrees = new mutable.LinkedHashMap[URI, List[SourceTree]]
 
-  private val myOpenFiles = new mutable.LinkedHashMap[URI, SourceFile]
+  def openedFiles: Map[URI, SourceFile] = myOpenedFiles
+  def openedTrees: Map[URI, List[SourceTree]] = myOpenedTrees
 
-  def openFiles: Map[URI, SourceFile] = myOpenFiles
+  def allTrees(implicit ctx: Context): List[SourceTree] = {
+    val fromSource = openedTrees.values.flatten.toList
+    val fromClassPath = (dirClassPathClasses ++ zipClassPathClasses).flatMap { cls =>
+      val className = cls.toTypeName
+      List(tree(className), tree(className.moduleClassName)).flatten
+    }
+    (fromSource ++ fromClassPath).distinct
+  }
 
-
-  private def tree(className: String): Option[SourceTree] = {
-    if (className == "scala.annotation.internal.SourceFile")
-      None // FIXME: No SourceFile annotation on SourceFile itself
-    else {
-      val clsd = ctx.base.staticRef(className.toTypeName)
-      clsd match {
-        case clsd: ClassDenotation =>
-          clsd.info // force denotation
-          if (!clsd.isAbsent) {
-            val tree = clsd.symbol.tree
-            if (tree != null) {
-              val sourceFile = new SourceFile(clsd.symbol.sourceFile, Codec.UTF8)
-              Some(SourceTree(sourceFile, tree))
-            } else None
-          } else None
-        case _ =>
-          sys.error(s"class not found: $className")
-      }
+  private def tree(className: TypeName)(implicit ctx: Context): Option[SourceTree] = {
+    val clsd = ctx.base.staticRef(className)
+    clsd match {
+      case clsd: ClassDenotation =>
+        SourceTree.fromSymbol(clsd.symbol.asClass)
+      case _ =>
+        sys.error(s"class not found: $className")
     }
   }
 
-  // FIXME: wrong when classpath changes
-  private lazy val tastyClasses = {
-    def classNames(cp: ClassPath, packageName: String): List[String] = {
-      val ClassPathEntries(pkgs, classReps) = cp.list(packageName)
+  private def classNames(cp: ClassPath, packageName: String): List[String] = {
+    def className(classSegments: List[String]) =
+      classSegments.mkString(".").stripSuffix(".class")
 
-      classReps
-        .filter((classRep: ClassRepresentation) => classRep.binary match {
-          case None =>
-            true
-          case Some(binFile) =>
-            val prefix =
-              if (binFile.name.endsWith("$.class"))
-                binFile.name.stripSuffix("$.class")
-              else if (binFile.name.endsWith(".class"))
-                binFile.name.stripSuffix(".class")
-              else
-                null
-            prefix != null && {
-              val tastyFile = prefix + ".tasty"
-              binFile match {
-                case ze: FileZipArchive#Entry =>
-                  val Some(archive: FileZipArchive) = ze.underlyingSource
-                  val dir = archive.allDirs(ZipArchive.dirName(ze.path))
-                  dir.entries.contains(tastyFile)
-                case pf: PlainFile =>
-                  val tastyPath = pf.givenPath.parent / tastyFile
-                  tastyPath.exists
-              }
+    val ClassPathEntries(pkgs, classReps) = cp.list(packageName)
+
+    classReps
+      .filter((classRep: ClassRepresentation) => classRep.binary match {
+        case None =>
+          true
+        case Some(binFile) =>
+          val prefix =
+            if (binFile.name.endsWith(".class"))
+              binFile.name.stripSuffix(".class")
+            else
+              null
+          // Presence of a file with one of these suffixes indicates that the
+          // corresponding class has been pickled with TASTY.
+          val tastySuffixes = List(".hasTasty", ".tasty")
+          prefix != null && {
+            binFile match {
+              case pf: PlainFile =>
+                tastySuffixes.map(suffix => pf.givenPath.parent / (prefix + suffix)).exists(_.exists)
+              case _ =>
+                sys.error(s"Unhandled file type: $binFile [getClass = ${binFile.getClass}]")
             }
-        })
-        .map(classRep => (packageName ++ (if (packageName != "") "." else "") ++ classRep.name)).toList ++
-        pkgs.flatMap(pkg => classNames(cp, pkg.name))
-    }
-
-    classNames(ctx.platform.classPath, "")
+          }
+      })
+      .map(classRep => (packageName ++ (if (packageName != "") "." else "") ++ classRep.name)).toList ++
+    pkgs.flatMap(pkg => classNames(cp, pkg.name))
   }
 
-  def trees: List[SourceTree] = {
-    val sourceClasses = openClasses.values.flatten.toList
-    val otherClasses = tastyClasses.filter(tastyClass =>
-      !sourceClasses.exists(sourceClass =>
-        tastyClass.toTypeName.stripModuleClassSuffix.toString == sourceClass.toTypeName.stripModuleClassSuffix.toString))
+  // FIXME: All the code doing classpath handling is very fragile and ugly,
+  // improving this requires changing the dotty classpath APIs to handle our usecases.
+  // We also need something like sbt server-mode to be informed of changes on
+  // the classpath.
 
-    (sourceClasses ++ otherClasses).flatMap(tree)
+  private val (zipClassPaths, dirClassPaths) = currentCtx.platform.classPath(currentCtx) match {
+    case AggregateClassPath(cps) =>
+      val (zipCps, dirCps) = cps.partition(_.isInstanceOf[ZipArchiveFileLookup[_]])
+      // This will be wrong if any other subclass of ClassPath is either used,
+      // like `JrtClassPath` once we get Java 9 support
+      (zipCps.asInstanceOf[Seq[ZipArchiveFileLookup[_]]], dirCps.asInstanceOf[Seq[JFileDirectoryLookup[_]]])
+    case _ =>
+      (Seq(), Seq())
   }
 
-  private def topLevelClassNames(tree: Tree): List[String] = {
+  // Like in `ZipArchiveFileLookup` we assume that zips are immutable
+  private val zipClassPathClasses: Seq[String] = zipClassPaths.flatMap { zipCp =>
+    // Working with Java 8 stream without SAMs and scala-java8-compat is awful.
+    val entries = new ZipFile(zipCp.zipFile)
+      .stream
+      .toArray(new IntFunction[Array[ZipEntry]] { def apply(size: Int) = new Array(size) })
+      .toSeq
+    entries.filter(_.getName.endsWith(".tasty"))
+      .map(_.getName.replace("/", ".").stripSuffix(".tasty"))
+  }
+
+  // FIXME: classfiles in directories may change at any point, so we retraverse
+  // the directories each time, if we knew when classfiles changed (sbt
+  // server-mode might help here), we could do cache invalidation instead.
+  private def dirClassPathClasses: Seq[String] = {
     val names = new mutable.ListBuffer[String]
-    object extract extends TreeTraverser {
-      override def traverse(tree: Tree)(implicit ctx: Context): Unit = tree match {
-        case t: PackageDef =>
-          traverseChildren(t)
-        case t @ TypeDef(_, tmpl : Template) =>
-          names += t.symbol.fullName.toString
-        case _ =>
-      }
+    dirClassPaths.foreach { dirCp =>
+      val root = dirCp.dir.toPath
+      Files.walkFileTree(root, new SimpleFileVisitor[Path] {
+        override def visitFile(path: Path, attrs: BasicFileAttributes) = {
+          if (!attrs.isDirectory && path.getFileName.toString.endsWith(".tasty")) {
+            names += root.relativize(path).toString.replace("/", ".").stripSuffix(".tasty")
+          }
+          FileVisitResult.CONTINUE
+        }
+      })
     }
-    extract.traverse(tree)
     names.toList
   }
 
-  private def newReporter: Reporter =
-    new StoreReporter(null) with UniqueMessagePositions with HideNonSensicalMessages
+  private def topLevelClassTrees(topTree: Tree, source: SourceFile): List[SourceTree] = {
+    val trees = new mutable.ListBuffer[SourceTree]
+
+    def addTrees(tree: Tree): Unit = tree match {
+      case PackageDef(_, stats) =>
+        stats.foreach(addTrees)
+      case tree: TypeDef =>
+        trees += SourceTree(tree, source)
+      case _ =>
+    }
+    addTrees(topTree)
+
+    trees.toList
+  }
 
   def run(uri: URI, sourceCode: String): List[MessageContainer] = {
+    val previousCtx = myCtx
     try {
-      val reporter = newReporter
+      val reporter =
+        new StoreReporter(null) with UniqueMessagePositions with HideNonSensicalMessages
+
       val run = compiler.newRun(myInitCtx.fresh.setReporter(reporter))
       myCtx = run.runContext
+
+      implicit val ctx = myCtx
 
       val virtualFile = new VirtualFile(uri.toString, Paths.get(uri).toString)
       val writer = new BufferedWriter(new OutputStreamWriter(virtualFile.output, "UTF-8"))
       writer.write(sourceCode)
       writer.close()
-      val sourceFile = new SourceFile(virtualFile, Codec.UTF8)
-      myOpenFiles(uri) = sourceFile
+      val source = new SourceFile(virtualFile, Codec.UTF8)
+      myOpenedFiles(uri) = source
 
       val basePath = "/home/florian/Desktop/EPFL/Master/sav/project/stainless/"
       val stainlessLibraryFiles = List(
@@ -188,25 +205,26 @@ class InteractiveDriver(settings: List[String], val compiler: Compiler) extends 
                           basePath + """./frontends/library/stainless/lang/synthesis/Oracle.scala""",
                           basePath + """./frontends/library/stainless/lang/synthesis/package.scala""",
                           basePath + """./frontends/library/stainless/util/Random.scala"""
-  ).map(x => new SourceFile(dotty.tools.io.AbstractFile.getFile(x), Codec.UTF8))
-      run.compileSources( stainlessLibraryFiles ++ List(sourceFile))
+        ).map(x => new SourceFile(dotty.tools.io.AbstractFile.getFile(x), Codec.UTF8))
+
+      run.compileSources(stainlessLibraryFiles ++ List(source))
       run.printSummary()
       val t = run.units.head.tpdTree
-      openClasses(uri) = topLevelClassNames(t)
+      myOpenedTrees(uri) = topLevelClassTrees(t, source)
 
       reporter.removeBufferedMessages
     }
     catch {
       case ex: FatalError  =>
-        ctx.error(ex.getMessage) // signals that we should fail compilation.
+        myCtx = previousCtx
         close(uri)
         Nil
     }
   }
 
   def close(uri: URI): Unit = {
-    myOpenFiles.remove(uri)
-    openClasses.remove(uri)
+    myOpenedFiles.remove(uri)
+    myOpenedTrees.remove(uri)
   }
 }
 

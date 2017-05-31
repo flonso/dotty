@@ -1,5 +1,7 @@
 *.DS_Store
 *.class
+*.tasty
+*.hasTasty
 *.log
 *.swp
 *~
@@ -32,8 +34,14 @@ classes/
 */bin/
 
 # Dotty IDE
+<<<<<<< HEAD
 .dotty-ide-dev-port
 .dotty-ide.json
+=======
+/.dotty-ide-dev-port
+/.dotty-ide-artifact
+/.dotty-ide.json
+>>>>>>> master
 
 # idea
 .idea

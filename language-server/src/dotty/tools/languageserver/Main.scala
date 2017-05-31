@@ -11,6 +11,18 @@ import org.eclipse.lsp4j._
 import org.eclipse.lsp4j.services._
 import org.eclipse.lsp4j.launch._
 
+/** Run the Dotty Language Server.
+ *
+ *  This is designed to be started from an editor supporting the Language Server
+ *  Protocol, the easiest way to fetch and run this is to use `coursier`:
+ *
+ *    coursier launch $artifact -M dotty.tools.languageserver.Main -- -stdio
+ *
+ *  Where $artifact comes from the `.dotty-ide-artifact` file in the current project, this file
+ *  can be created by the sbt-dotty plugin by running `sbt configureIDE`.
+ *
+ *  See vscode-dotty/ for an example integration of the Dotty Language Server into Visual Studio Code.
+ */
 object Main {
   def main(args: Array[String]): Unit = {
     args.toList match {
@@ -33,7 +45,7 @@ object Main {
         println("Starting client: " + clientCommand)
         val clientPB = new java.lang.ProcessBuilder(clientCommand: _*)
         clientPB.environment.put("DLS_DEV_MODE", "1")
-        
+
         val pw = new PrintWriter("../.dotty-ide-dev-port")
         pw.write(serverSocket.getLocalPort.toString)
         pw.close()
@@ -44,15 +56,16 @@ object Main {
 
         startServer(clientSocket.getInputStream, clientSocket.getOutputStream)
       case _ =>
-        Console.err.println("Invalid arguments: expected \"-stdio\" or \"-port NNNN\"")
+        Console.err.println("Invalid arguments: expected \"-stdio\" or \"-client_command ...\"")
         System.exit(1)
     }
   }
 
   def startServer(in: InputStream, out: OutputStream) = {
-    val server = new ScalaLanguageServer
+    val server = new DottyLanguageServer
 
     println("Starting server")
+    // For debugging JSON messages:
     // val launcher = LSPLauncher.createServerLauncher(server, in, out, false, new java.io.PrintWriter(System.err, true))
     val launcher = LSPLauncher.createServerLauncher(server, in, out)
     val client = launcher.getRemoteProxy()

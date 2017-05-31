@@ -325,8 +325,8 @@ class ClassfileLoader(val classfile: AbstractFile) extends SymbolLoader {
     val (classRoot, moduleRoot) = rootDenots(root.asClass)
     (new ClassfileParser(classfile, classRoot, moduleRoot)(ctx)).run() match {
       case Some(unpickler: tasty.DottyUnpickler) if ctx.settings.YretainTrees.value =>
-        classRoot.symbol.unpickler = unpickler
-        moduleRoot.symbol.unpickler = unpickler
+        classRoot.symbol.asClass.unpickler = unpickler
+        moduleRoot.symbol.asClass.unpickler = unpickler
       case _ =>
     }
   }

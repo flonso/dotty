@@ -3,7 +3,8 @@ enum class Option[+T >: Null] extends Serializable {
 }
 object Option {
   def apply[T >: Null](x: T): Option[T] = if (x == null) None else Some(x)
-  case Some(x: T) {
+
+  case Some[+T >: Null](x: T) {
      def isDefined = true
   }
   case None {
@@ -15,5 +16,6 @@ object Test {
   def main(args: Array[String]) = {
     assert(Some(None).isDefined)
     Option("22") match { case Option.Some(x) => assert(x == "22") }
+    assert(Some(None) != None)
   }
 }

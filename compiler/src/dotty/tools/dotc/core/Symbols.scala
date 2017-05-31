@@ -20,7 +20,8 @@ import DenotTransformers._
 import StdNames._
 import NameOps._
 import NameKinds.LazyImplicitName
-import ast.tpd.Tree
+import ast.tpd
+import tpd.Tree
 import ast.TreeTypeMap
 import Constants.Constant
 import reporting.diagnostic.Message
@@ -343,7 +344,7 @@ trait Symbols { this: Context =>
         copy.denot = odenot.copySymDenotation(
           symbol = copy,
           owner = ttmap1.mapOwner(odenot.owner),
-          initFlags = odenot.flags &~ (Frozen | Touched) | Fresh,
+          initFlags = odenot.flags &~ Touched | Fresh,
           info = completer,
           privateWithin = ttmap1.mapOwner(odenot.privateWithin), // since this refers to outer symbols, need not include copies (from->to) in ownermap here.
           annotations = odenot.annotations)
@@ -356,7 +357,7 @@ trait Symbols { this: Context =>
 // ----- Locating predefined symbols ----------------------------------------
 
   def requiredPackage(path: PreName): TermSymbol =
-    base.staticRef(path.toTermName).requiredSymbol(_ is Package).asTerm
+    base.staticRef(path.toTermName, isPackage = true).requiredSymbol(_ is Package).asTerm
 
   def requiredPackageRef(path: PreName): TermRef = requiredPackage(path).termRef
 
@@ -391,34 +392,6 @@ object Symbols {
 
     //assert(id != 3548)
 
-    /** If this is a symbol for a top-level class, and if
-     *  `-Ykeep-trees` is set, return the tree for this class,
-     *  otherwise null.
-     */
-    def tree(implicit ctx: Context): Tree = {
-      if (unpickler != null && !denot.isAbsent) {
-        assert(myTree == null)
-
-        import ast.Trees._
-
-        def findTree(tree: ast.tpd.Tree): Option[ast.tpd.Tree] = tree match {
-          case PackageDef(_, stats) =>
-            stats.flatMap(findTree).headOption
-          case _ =>
-            if (tree.symbol eq this)
-              Some(tree)
-            else
-              None
-        }
-        val List(unpickledTree) = unpickler.body(ctx.addMode(Mode.ReadPositions))
-        unpickler = null
-
-        myTree = findTree(unpickledTree).get
-      }
-      myTree
-    }
-    private[dotc] var myTree: Tree = _
-    private[dotc] var unpickler: tasty.DottyUnpickler = _
 
     /** The last denotation of this symbol */
     private[this] var lastDenot: SymDenotation = _
@@ -496,6 +469,8 @@ object Symbols {
           if (this is Module) this.moduleClass.validFor |= InitialPeriod
         }
         else this.owner.asClass.ensureFreshScopeAfter(phase)
+        if (!this.flagsUNSAFE.is(Private))
+          assert(phase.changesMembers, i"$this entered in ${this.owner} at undeclared phase $phase")
         entered
       }
 
@@ -581,6 +556,34 @@ object Symbols {
 
     type ThisName = TypeName
 
+    /** If this is a top-level class, and if `-Yretain-trees` is set, return the TypeDef tree
+     *  for this class, otherwise EmptyTree.
+     */
+    def tree(implicit ctx: Context): tpd.Tree /* tpd.TypeDef | tpd.EmptyTree */ = {
+      // TODO: Consider storing this tree like we store lazy trees for inline functions
+      if (unpickler != null && !denot.isAbsent) {
+        assert(myTree.isEmpty)
+
+        import ast.Trees._
+
+        def findTree(tree: tpd.Tree): Option[tpd.TypeDef] = tree match {
+          case PackageDef(_, stats) =>
+            stats.flatMap(findTree).headOption
+          case tree: tpd.TypeDef if tree.symbol == this =>
+            Some(tree)
+          case _ =>
+              None
+        }
+        val List(unpickledTree) = unpickler.body(ctx.addMode(Mode.ReadPositions))
+        unpickler = null
+
+        myTree = findTree(unpickledTree).get
+      }
+      myTree
+    }
+    private[dotc] var myTree: tpd.Tree = tpd.EmptyTree
+    private[dotc] var unpickler: tasty.DottyUnpickler = _
+
     /** The source or class file from which this class was generated, null if not applicable. */
     override def associatedFile(implicit ctx: Context): AbstractFile =
       if (assocFile != null || (this.owner is PackageClass) || this.isEffectiveRoot) assocFile
@@ -588,27 +591,6 @@ object Symbols {
 
     final def classDenot(implicit ctx: Context): ClassDenotation =
       denot.asInstanceOf[ClassDenotation]
-
-    private var superIdHint: Int = -1
-
-    override def superId(implicit ctx: Context): Int = {
-      val hint = superIdHint
-      if (hint >= 0 && hint <= ctx.lastSuperId && (ctx.classOfId(hint) eq this))
-        hint
-      else {
-        val id = ctx.superIdOfClass get this match {
-          case Some(id) =>
-            id
-          case None =>
-            val id = ctx.nextSuperId
-            ctx.superIdOfClass(this) = id
-            ctx.classOfId(id) = this
-            id
-        }
-        superIdHint = id
-        id
-      }
-    }
 
     override protected def prefixString = "ClassSymbol"
   }

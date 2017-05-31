@@ -19,6 +19,8 @@ import printing.Highlighting._
 import printing.Formatting
 import ErrorMessageID._
 import Denotations.SingleDenotation
+import dotty.tools.dotc.ast.Trees
+import dotty.tools.dotc.core.Flags.{FlagSet, Mutable}
 import dotty.tools.dotc.core.SymDenotations.SymDenotation
 
 object messages {
@@ -291,7 +293,12 @@ object messages {
         )
       }
 
-      ex"$selected `$name` is not a member of $site$closeMember"
+      val siteType = site match {
+        case tp: NamedType => tp.info
+        case tp => tp
+      }
+
+      ex"$selected `$name` is not a member of $siteType$closeMember"
     }
 
     val explanation = ""
@@ -351,7 +358,8 @@ object messages {
     val explanation = {
       val TypeDef(name, impl @ Template(constr0, parents, self, _)) = cdef
       val exampleArgs =
-        constr0.vparamss(0).map(_.withMods(untpd.Modifiers()).show).mkString(", ")
+        if(constr0.vparamss.isEmpty) "..."
+        else constr0.vparamss(0).map(_.withMods(untpd.Modifiers()).show).mkString(", ")
       def defHasBody[T] = impl.body.exists(!_.isEmpty)
       val exampleBody = if (defHasBody) "{\n ...\n }" else ""
       hl"""|There may not be any method, member or object in scope with the same name as
@@ -786,7 +794,12 @@ object messages {
            |It would fail on: $uncovered"""
 
 
-    val explanation = ""
+    val explanation =
+      hl"""|There are several ways to make the match exhaustive:
+           | - Add missing cases as shown in the warning
+           | - If an extractor always return 'Some(...)', write 'Some[X]' for its return type
+           | - Add a 'case _ => ...' at the end to match all remaining cases
+           |"""
   }
 
   case class MatchCaseUnreachable()(implicit ctx: Context)
@@ -1135,21 +1148,6 @@ object messages {
            |""".stripMargin
   }
 
-  case class AnnotatedPrimaryConstructorRequiresModifierOrThis(cls: Name)(implicit ctx: Context)
-  extends Message(AnnotatedPrimaryConstructorRequiresModifierOrThisID) {
-    val kind = "Syntax"
-    val msg = hl"""${"private"}, ${"protected"}, or ${"this"} expected for annotated primary constructor"""
-    val explanation =
-      hl"""|When using annotations with a primary constructor of a class,
-           |the annotation must be followed by an access modifier
-           |(${"private"} or ${"protected"}) or ${"this"}.
-           |
-           |For example:
-           |  ${"class Sample @deprecated this(param: Parameter) { ..."}
-           |                           ^^^^
-           |""".stripMargin
-  }
-
   case class OverloadedOrRecursiveMethodNeedsResultType(tree: Names.TermName)(implicit ctx: Context)
   extends Message(OverloadedOrRecursiveMethodNeedsResultTypeID) {
     val kind = "Syntax"
@@ -1223,17 +1221,24 @@ object messages {
   case class AmbiguousImport(name: Names.Name, newPrec: Int, prevPrec: Int, prevCtx: Context)(implicit ctx: Context)
     extends Message(AmbiguousImportID) {
 
-    import typer.Typer.BindingPrec._
+    import typer.Typer.BindingPrec
 
     /** A string which explains how something was bound; Depending on `prec` this is either
       *      imported by <tree>
       *  or  defined in <symbol>
       */
-    private def bindingString(prec: Int, whereFound: Context, qualifier: String = "") =
-      if (isImportPrec(prec)) {
-        ex"""imported$qualifier by ${hl"${whereFound.importInfo}"}"""
+    private def bindingString(prec: Int, whereFound: Context, qualifier: String = "") = {
+      val howVisible = prec match {
+        case BindingPrec.definition => "defined"
+        case BindingPrec.namedImport => "imported by name"
+        case BindingPrec.wildImport => "imported"
+        case BindingPrec.packageClause => "found"
+      }
+      if (BindingPrec.isImportPrec(prec)) {
+        ex"""$howVisible$qualifier by ${hl"${whereFound.importInfo}"}"""
       } else
-        ex"""defined$qualifier in ${hl"${whereFound.owner.toString}"}"""
+        ex"""$howVisible$qualifier in ${hl"${whereFound.owner}"}"""
+    }
 
 
     val msg =
@@ -1277,7 +1282,7 @@ object messages {
           |$noParameters""".stripMargin
 
   }
-                        
+
   case class AmbiguousOverload(tree: tpd.Tree, alts: List[SingleDenotation], pt: Type)(
     err: typer.ErrorReporting.Errors)(
     implicit ctx: Context)
@@ -1296,7 +1301,7 @@ object messages {
            |- adding a type ascription as in `${"instance.myMethod: String => Int"}`
            |"""
   }
-                        
+
   case class ReassignmentToVal(name: Names.Name)(implicit ctx: Context)
     extends Message(ReassignmentToValID) {
     val kind = "Reference"
@@ -1310,4 +1315,255 @@ object messages {
            |  ${"var"} $name ${"="} ...
            |""".stripMargin
   }
+
+  case class TypeDoesNotTakeParameters(tpe: Types.Type, params: List[Trees.Tree[Trees.Untyped]])(implicit ctx: Context)
+    extends Message(TypeDoesNotTakeParametersID) {
+    val kind = "Reference"
+    val msg = hl"$tpe does not take type parameters"
+
+    private val ps =
+      if (params.size == 1) hl"a type parameter ${params.head}"
+      else hl"type parameters ${params.map(_.show).mkString(", ")}"
+
+    val explanation =
+      i"""You specified $ps for ${hl"$tpe"}, which is not
+         |declared to take any.
+         |"""
+  }
+
+  case class ParameterizedTypeLacksArguments(psym: Symbol)(implicit ctx: Context)
+    extends Message(ParameterizedTypeLacksArgumentsID) {
+    val msg = hl"parameterized $psym lacks argument list"
+    val kind = "Reference"
+    val explanation =
+      hl"""The $psym is declared with non-implicit parameters, you may not leave
+          |out the parameter list when extending it.
+          |"""
+  }
+
+  case class VarValParametersMayNotBeCallByName(name: Names.TermName, mutable: Boolean)(implicit ctx: Context)
+    extends Message(VarValParametersMayNotBeCallByNameID) {
+    val msg = s"${if (mutable) "`var'" else "`val'"} parameters may not be call-by-name"
+    val kind = "Syntax"
+    val explanation =
+      hl"""${"var"} and ${"val"} parameters of classes and traits may no be call-by-name. In case you
+          |want the parameter to be evaluated on demand, consider making it just a parameter
+          |and a ${"def"} in the class such as
+          |  ${s"class MyClass(${name}Tick: => String) {"}
+          |  ${s"  def $name() = ${name}Tick"}
+          |  ${"}"}
+          |"""
+  }
+
+  case class MissingTypeParameterFor(tpe: Type)(implicit ctx: Context)
+    extends Message(MissingTypeParameterForID) {
+    val msg = hl"missing type parameter for ${tpe}"
+    val kind = "Syntax"
+    val explanation = ""
+  }
+
+  case class DoesNotConformToBound(tpe: Type, which: String, bound: Type)(
+    err: typer.ErrorReporting.Errors)(implicit ctx: Context)
+    extends Message(DoesNotConformToBoundID) {
+    val msg = hl"Type argument ${tpe} does not conform to $which bound $bound ${err.whyNoMatchStr(tpe, bound)}"
+    val kind = "Type Mismatch"
+    val explanation = ""
+  }
+
+  case class DoesNotConformToSelfType(category: String, selfType: Type, cls: Symbol,
+                                      otherSelf: Type, relation: String, other: Symbol)(
+    implicit ctx: Context)
+    extends Message(DoesNotConformToSelfTypeID) {
+    val msg = hl"""$category: self type $selfType of $cls does not conform to self type $otherSelf
+                  |of $relation $other"""
+    val kind = "Type Mismatch"
+    val explanation =
+      hl"""You mixed in $other which requires self type $otherSelf, but $cls has self type
+          |$selfType and does not inherit from $otherSelf.
+          |
+          |Note: Self types are indicated with the notation
+          |  ${s"class "}$other ${"{ this: "}$otherSelf${" => "}
+        """
+  }
+
+  case class DoesNotConformToSelfTypeCantBeInstantiated(tp: Type, selfType: Type)(
+    implicit ctx: Context)
+    extends Message(DoesNotConformToSelfTypeCantBeInstantiatedID) {
+    val msg = hl"""$tp does not conform to its self type $selfType; cannot be instantiated"""
+    val kind = "Type Mismatch"
+    val explanation =
+      hl"""To create an instance of $tp it needs to inherit $selfType in some way.
+          |
+          |Note: Self types are indicated with the notation
+          |  ${s"class "}$tp ${"{ this: "}$selfType${" => "}
+          |"""
+  }
+
+  case class AbstractMemberMayNotHaveModifier(sym: Symbol, flag: FlagSet)(
+    implicit ctx: Context)
+    extends Message(AbstractMemberMayNotHaveModifierID) {
+    val msg = hl"""${"abstract"} $sym may not have `$flag' modifier"""
+    val kind = "Syntax"
+    val explanation = ""
+  }
+
+  case class TopLevelCantBeImplicit(sym: Symbol)(
+    implicit ctx: Context)
+    extends Message(TopLevelCantBeImplicitID) {
+    val msg = hl"""${"implicit"} modifier cannot be used for top-level definitions"""
+    val kind = "Syntax"
+    val explanation = ""
+  }
+
+  case class TypesAndTraitsCantBeImplicit(sym: Symbol)(
+    implicit ctx: Context)
+    extends Message(TypesAndTraitsCantBeImplicitID) {
+    val msg = hl"""${"implicit"} modifier cannot be used for types or traits"""
+    val kind = "Syntax"
+    val explanation = ""
+  }
+
+  case class OnlyClassesCanBeAbstract(sym: Symbol)(
+    implicit ctx: Context)
+    extends Message(OnlyClassesCanBeAbstractID) {
+    val msg = hl"""${"abstract"} modifier can be used only for classes; it should be omitted for abstract members"""
+    val kind = "Syntax"
+    val explanation = ""
+  }
+
+  case class AbstractOverrideOnlyInTraits(sym: Symbol)(
+    implicit ctx: Context)
+    extends Message(AbstractOverrideOnlyInTraitsID) {
+    val msg = hl"""${"abstract override"} modifier only allowed for members of traits"""
+    val kind = "Syntax"
+    val explanation = ""
+  }
+
+  case class TraitsMayNotBeFinal(sym: Symbol)(
+    implicit ctx: Context)
+    extends Message(TraitsMayNotBeFinalID) {
+    val msg = hl"""$sym may not be ${"final"}"""
+    val kind = "Syntax"
+    val explanation =
+      "A trait can never be final since it is abstract and must be extended to be useful."
+  }
+
+  case class NativeMembersMayNotHaveImplementation(sym: Symbol)(
+    implicit ctx: Context)
+    extends Message(NativeMembersMayNotHaveImplementationID) {
+    val msg = hl"""${"@native"} members may not have an implementation"""
+    val kind = "Syntax"
+    val explanation = ""
+  }
+
+  case class OnlyClassesCanHaveDeclaredButUndefinedMembers(sym: Symbol)(
+    implicit ctx: Context)
+    extends Message(OnlyClassesCanHaveDeclaredButUndefinedMembersID) {
+
+    private val varNote =
+      if (sym.is(Mutable)) "Note that variables need to be initialized to be defined."
+      else ""
+    val msg = hl"""only classes can have declared but undefined members"""
+    val kind = "Syntax"
+    val explanation = s"$varNote"
+  }
+
+  case class CannotExtendAnyVal(sym: Symbol)(implicit ctx: Context)
+    extends Message(CannotExtendAnyValID) {
+    val msg = hl"""$sym cannot extend ${"AnyVal"}"""
+    val kind = "Syntax"
+    val explanation =
+      hl"""Only classes (not traits) are allowed to extend ${"AnyVal"}, but traits may extend
+          |${"Any"} to become ${Green("\"universal traits\"")} which may only have ${"def"} members.
+          |Universal traits can be mixed into classes that extend ${"AnyVal"}.
+          |"""
+  }
+
+  case class CannotHaveSameNameAs(sym: Symbol, cls: Symbol, reason: CannotHaveSameNameAs.Reason)(implicit ctx: Context)
+    extends Message(CannotHaveSameNameAsID) {
+    import CannotHaveSameNameAs._
+    def reasonMessage: String = reason match {
+      case CannotBeOverridden => "class definitions cannot be overridden"
+      case DefinedInSelf(self) =>
+        s"""cannot define ${sym.showKind} member with the same name as a ${cls.showKind} member in self reference ${self.name}.
+           |(Note: this can be resolved by using another name)
+           |""".stripMargin
+    }
+
+    val msg = hl"""$sym cannot have the same name as ${cls.showLocated} -- """ + reasonMessage
+    val kind = "Syntax"
+    val explanation = ""
+  }
+  object CannotHaveSameNameAs {
+    sealed trait Reason
+    case object CannotBeOverridden extends Reason
+    case class DefinedInSelf(self: tpd.ValDef) extends Reason
+  }
+
+  case class ValueClassesMayNotDefineInner(valueClass: Symbol, inner: Symbol)(implicit ctx: Context)
+    extends Message(ValueClassesMayNotDefineInnerID) {
+    val msg = hl"""value classes may not define an inner class"""
+    val kind = "Syntax"
+    val explanation = ""
+  }
+
+  case class ValueClassesMayNotDefineNonParameterField(valueClass: Symbol, field: Symbol)(implicit ctx: Context)
+    extends Message(ValueClassesMayNotDefineNonParameterFieldID) {
+    val msg = hl"""value classes may not define non-parameter field"""
+    val kind = "Syntax"
+    val explanation = ""
+  }
+
+  case class ValueClassesMayNotDefineASecondaryConstructor(valueClass: Symbol, constructor: Symbol)(implicit ctx: Context)
+    extends Message(ValueClassesMayNotDefineASecondaryConstructorID) {
+    val msg = hl"""value classes may not define a secondary constructor"""
+    val kind = "Syntax"
+    val explanation = ""
+  }
+
+  case class ValueClassesMayNotContainInitalization(valueClass: Symbol)(implicit ctx: Context)
+    extends Message(ValueClassesMayNotContainInitalizationID) {
+    val msg = hl"""value classes may not contain initialization statements"""
+    val kind = "Syntax"
+    val explanation = ""
+  }
+
+  case class ValueClassesMayNotBeAbstract(valueClass: Symbol)(implicit ctx: Context)
+    extends Message(ValueClassesMayNotBeAbstractID) {
+    val msg = hl"""value classes may not be ${"abstract"}"""
+    val kind = "Syntax"
+    val explanation = ""
+  }
+
+  case class ValueClassesMayNotBeContainted(valueClass: Symbol)(implicit ctx: Context)
+    extends Message(ValueClassesMayNotBeContaintedID) {
+    private val localOrMember = if (valueClass.owner.isTerm) "local class" else "member of another class"
+    val msg = s"""value classes may not be a $localOrMember"""
+    val kind = "Syntax"
+    val explanation = ""
+  }
+
+  case class ValueClassesMayNotWrapItself(valueClass: Symbol)(implicit ctx: Context)
+    extends Message(ValueClassesMayNotWrapItselfID) {
+    val msg = """a value class may not wrap itself"""
+    val kind = "Syntax"
+    val explanation = ""
+  }
+
+  case class ValueClassParameterMayNotBeAVar(valueClass: Symbol, param: Symbol)(implicit ctx: Context)
+    extends Message(ValueClassParameterMayNotBeAVarID) {
+    val msg = hl"""a value class parameter may not be a ${"var"}"""
+    val kind = "Syntax"
+    val explanation =
+      hl"""A value class must have exactly one ${"val"} parameter.
+          |"""
+  }
+
+  case class ValueClassNeedsExactlyOneValParam(valueClass: Symbol)(implicit ctx: Context)
+    extends Message(ValueClassNeedsExactlyOneValParamID) {
+    val msg = hl"""value class needs to have exactly one ${"val"} parameter"""
+    val kind = "Syntax"
+    val explanation = ""
+  }
+
 }

@@ -17,6 +17,7 @@ import core.DenotTransformers.DenotTransformer
 import core.Denotations.SingleDenotation
 
 import dotty.tools.backend.jvm.{LabelDefs, GenBCode, CollectSuperCalls}
+import dotty.tools.dotc.transform.linker.Simplify
 
 /** The central class of the dotc compiler. The job of a compiler is to create
  *  runs, which process given `phases` in a given `rootContext`.
@@ -49,6 +50,7 @@ class Compiler {
       List(new FirstTransform,      // Some transformations to put trees into a canonical form
            new CheckReentrant),     // Internal use only: Check that compiled program has no data races involving global vars
       List(new CheckStatic,         // Check restrictions that apply to @static members
+           new CheckPhantomCast,    // Checks that no Phantom types in are in casts
            new ElimRepeated,        // Rewrite vararg parameters and arguments
            new RefChecks,           // Various checks mostly related to abstract members and overriding
            new NormalizeFlags,      // Rewrite some definition flags
@@ -74,7 +76,9 @@ class Compiler {
            new ElimByName,          // Expand by-name parameter references
            new AugmentScala2Traits, // Expand traits defined in Scala 2.11 to simulate old-style rewritings
            new ResolveSuper,        // Implement super accessors and add forwarders to trait methods
+           new Simplify,            // Perform local optimizations, simplified versions of what linker does.
            new PrimitiveForwarders, // Add forwarders to trait methods that have a mismatch between generic and primitives
+           new FunctionXXLForwarders, // Add forwarders for FunctionXXL apply method
            new ArrayConstructors),  // Intercept creation of (non-generic) arrays and intrinsify.
       List(new Erasure),            // Rewrite types to JVM model, erasing all type parameters, abstract types and refinements.
       List(new ElimErasedValueType, // Expand erased value types to their underlying implmementation types
@@ -86,15 +90,17 @@ class Compiler {
            new NonLocalReturns,     // Expand non-local returns
            new CapturedVars,        // Represent vars captured by closures as heap objects
            new Constructors,        // Collect initialization code in primary constructors
-                                       // Note: constructors changes decls in transformTemplate, no InfoTransformers should be added after it
+                                    // Note: constructors changes decls in transformTemplate, no InfoTransformers should be added after it
            new FunctionalInterfaces, // Rewrites closures to implement @specialized types of Functions.
-           new GetClass),           // Rewrites getClass calls on primitive types.
+           new GetClass,            // Rewrites getClass calls on primitive types.
+           new Simplify),           // Perform local optimizations, simplified versions of what linker does.
       List(new LambdaLift,          // Lifts out nested functions to class scope, storing free variables in environments
                                        // Note: in this mini-phase block scopes are incorrect. No phases that rely on scopes should be here
            new ElimStaticThis,      // Replace `this` references to static objects by global identifiers
            new Flatten,             // Lift all inner classes to package scope
            new RestoreScopes),      // Repair scopes rendered invalid by moving definitions in prior phases of the group
-      List(new MoveStatics,         // Move static methods to companion classes
+      List(new TransformWildcards,  // Replace wildcards with default values
+           new MoveStatics,         // Move static methods to companion classes
            new ExpandPrivate,       // Widen private definitions accessed from nested classes
            new SelectStatic,        // get rid of selects that would be compiled into GetStatic
            new CollectEntryPoints,  // Find classes with main methods

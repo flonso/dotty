@@ -31,10 +31,8 @@ import dotty.tools.dotc.util.Positions.Position
 import dotty.tools.dotc.core.Decorators._
 import dotty.tools.dotc.core.Flags
 
-/** This transform eliminates patterns. Right now it's a dummy.
- *  Awaiting the real pattern matcher.
- *  elimRepeated is required
- * TODO: outer tests are not generated yet.
+/** This phase rewrites pattern matches.
+ *  FIXME: A more detailed explanation would be good.
  */
 class PatternMatcher extends MiniPhaseTransform with DenotTransformer {
   import dotty.tools.dotc.ast.tpd._
@@ -351,15 +349,17 @@ class PatternMatcher extends MiniPhaseTransform with DenotTransformer {
       /* (Nil, body) means that `body` is the default case
        * It's a bit hacky but it simplifies manipulations.
        */
-      def extractSwitchCase(treeMakers: List[TreeMaker]): (List[Int], BodyTreeMaker) = treeMakers match {
+      def extractSwitchCase(treeMakers: List[TreeMaker]): (List[Int], BodyTreeMaker) = (treeMakers: @unchecked) match {
         // case 5 =>
         case List(IntEqualityTestTreeMaker(intValue), body: BodyTreeMaker) =>
           (List(intValue), body)
 
         // case 5 | 6 =>
         case List(AlternativesTreeMaker(_, alts, _), body: BodyTreeMaker) =>
-          val intValues = alts.map {
-            case List(IntEqualityTestTreeMaker(intValue)) => intValue
+          val intValues = alts.map { alt =>
+            (alt: @unchecked) match {
+              case List(IntEqualityTestTreeMaker(intValue)) => intValue
+            }
           }
           (intValues, body)
 

@@ -11,7 +11,6 @@ pipeline:
     image: lampepfl/dotty:24-04-2017
     pull: true
     commands:
-      - ln -s /var/cache/drone/ivy2 "$HOME/.ivy2"
       - ./project/scripts/sbt "${CI_TEST}"
     when:
       branch:
@@ -22,13 +21,24 @@ pipeline:
     pull: true
     commands:
       - ./project/scripts/sbt ";clean ;publishLocal" "${CI_PUBLISH}"
-      - ./project/scripts/sbt "dotty-sbt-scripted-tests/scripted source-dependencies/*" "${CI_PUBLISH}"
-      - ./project/scripts/sbtPublish '${CI_PUBLISH}' '$SONATYPE_USER' '$SONATYPE_PW' '$PGP_PW'
+      - ./project/scripts/sbt "sbt-dotty/scripted source-dependencies/*" "${CI_PUBLISH}"
+      - NIGHTLYBUILD="yes" ./project/scripts/sbtPublish ${CI_PUBLISH} $SONATYPE_USER $SONATYPE_PW $PGP_PW
     volumes:
       - /home/drone/keys:/keys
     when:
       event: deployment
       environment: nightly
+
+  publish_release:
+    image: lampepfl/dotty:24-04-2017
+    pull: true
+    commands:
+      - RELEASEBUILD="yes" ./project/scripts/sbtPublish ${CI_PUBLISH} $SONATYPE_USER $SONATYPE_PW $PGP_PW
+    volumes:
+      - /home/drone/keys:/keys
+    when:
+      event: deployment
+      environment: release
 
   documentation:
     image: lampepfl/dotty:24-04-2017
@@ -51,7 +61,7 @@ matrix:
       CI_PUBLISH: true
     - CI_TEST: legacyTests
       CI_PUBLISH: false
-    - CI_TEST: ;test;sbt-dotty/scripted
+    - CI_TEST: ;test;sbt-dotty/scripted compilerReporter/*;sbt-dotty/scripted discovery/*;sbt-dotty/scripted sbt-dotty/*
       CI_PUBLISH: false
     - CI_TEST: dotty-bootstrapped/test
       CI_PUBLISH: false
