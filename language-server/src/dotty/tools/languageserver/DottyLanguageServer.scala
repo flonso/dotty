@@ -31,6 +31,7 @@ import lsp4j.services._
 import java.util.function.Function
 import java.util.function.Supplier
 
+import stainless.{ast => _, _}
 import stainless.frontends.dotc._
 import inox.utils._
 
@@ -173,6 +174,37 @@ class DottyLanguageServer extends LanguageServer
 
     val text = document.getText
     val diags = driver.run(uri, text)
+
+    val compiler = driver.compiler.asInstanceOf[DottyCompiler]
+    val inoxCtx = compiler.getCtx
+    val reporter = inoxCtx.reporter
+
+    val program = compiler.extraction.getProgram
+    val structure = compiler.extraction.getStructure
+    val components =  Seq(
+      verification.VerificationComponent,
+      termination.TerminationComponent
+    )
+
+    /*
+    println("extraction : " + compiler.extraction.hashCode)
+    println("program : " + program)
+    println("structure : " + structure)
+    */
+
+    val activeComponents = components.filter { c =>
+      inoxCtx.options.options.collectFirst {
+        case inox.OptionValue(o, value: Boolean) if o.name == c.name => value
+      }.getOrElse(false)
+    }
+
+    val toExecute = if (activeComponents.isEmpty) {
+      Seq(verification.VerificationComponent)
+    } else {
+      activeComponents
+    }
+
+    for (c <- toExecute) c(structure, program).emit()
 
     client.publishDiagnostics(new PublishDiagnosticsParams(
       document.getUri,

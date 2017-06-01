@@ -747,6 +747,7 @@ object Build {
       libraryDependencies ++= Seq(
         "org.eclipse.lsp4j" % "org.eclipse.lsp4j" % "0.2.0.M7",
         "ch.epfl.lara" % "stainless-dotty_2.11" % "0.1",
+        //"ch.epfl.lara" % "stainless-scalac_2.11" % "0.1",
         Deps.`jackson-databind`
       ),
       javaOptions := (javaOptions in `dotty-compiler`).value,
