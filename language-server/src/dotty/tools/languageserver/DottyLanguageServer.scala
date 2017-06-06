@@ -79,20 +79,14 @@ class DottyLanguageServer extends LanguageServer
         println("inoxCtx: " + inoxCtx)
         val stainlessCompiler = try {
           new DottyCompiler(inoxCtx)
-       } catch {
-          case e: Throwable =>
-            e.printStackTrace
-            ???
-       }
-        println("st: " + stainlessCompiler)
-
-        println("stainlessCompiler: " + stainlessCompiler)
-
+        } catch {
+            case e: Throwable =>
+              e.printStackTrace
+              ???
+        }
         myDrivers.put(config, new InteractiveDriver(settings, stainlessCompiler))
       }
-      println("myDrivers: " + myDrivers)
     }
-    println("##drivers: " + myDrivers)
     myDrivers
   }
 
@@ -204,7 +198,13 @@ class DottyLanguageServer extends LanguageServer
       activeComponents
     }
 
-    for (c <- toExecute) c(structure, program).emit()
+    val reports = for (c <- toExecute) yield c(structure, program)
+    reports.foreach(_.emit())
+
+    /*
+    println("---- REPORTS ----")
+    reports.foreach(x => println(x.emitIde))
+    // */
 
     client.publishDiagnostics(new PublishDiagnosticsParams(
       document.getUri,
