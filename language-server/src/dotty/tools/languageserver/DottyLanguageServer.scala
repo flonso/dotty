@@ -184,7 +184,12 @@ class DottyLanguageServer extends LanguageServer
 
   // Converts Stainless' output into Diagnostic understandable by the IDE
   def generate_diags(reports: Seq[List[Object]]): Seq[lsp4j.Diagnostic] = {
-    reports.map(x => x match {
+    reports.filter(x => x match {
+        case List(_, _, _, status: VCStatus[inox.Model]) => status match {
+          case Invalid(cex) => true
+          case _ => false
+        }
+      }).map(x => x match {
       case List(fd: String, pos_tmp: inox.utils.Position, kind: String, status: VCStatus[inox.Model]) =>
         val info = status match { 
           case Invalid(cex) => new Status(status.name, cex)
