@@ -196,8 +196,8 @@ class DottyLanguageServer extends LanguageServer
           case pos @ inox.utils.OffsetPosition(line, col, _, file) =>
             new Position(new Coord(line, col), new Coord(line, col))
           case range: inox.utils.RangePosition =>
-            new Position(new Coord(range.focusBegin.line, range.focusBegin.col),
-              new Coord(range.focusEnd.line, range.focusEnd.col))
+            new Position(new Coord(range.focusBegin.line - 1, range.focusBegin.col - 1),
+              new Coord(range.focusEnd.line - 1, range.focusEnd.col - 1))
         }
 
         val sev = if(info.name == "invalid") 2 else 0
@@ -246,7 +246,7 @@ class DottyLanguageServer extends LanguageServer
     }
 
     val reports = for (c <- toExecute) yield c(structure, program)
-    val finalReports = reports.flatMap(x => x.emitIde)
+    val finalReports = reports.flatMap(_.emitIde)
 
     generate_diags(finalReports)
   }
