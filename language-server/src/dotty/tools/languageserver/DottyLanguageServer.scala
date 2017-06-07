@@ -69,7 +69,6 @@ class DottyLanguageServer extends LanguageServer
       assert(rootUri != null, "`drivers` cannot be called before `initialize`")
       val configFile = new File(new URI(rootUri + '/' + IDE_CONFIG_FILE))
       val configs: List[ProjectConfig] = (new ObjectMapper).readValue(configFile, classOf[Array[ProjectConfig]]).toList
-      println("configs: " + configs)
 
       val defaultFlags = List(/*"-Yplain-printer","-Yprintpos"*/)
 
@@ -80,7 +79,6 @@ class DottyLanguageServer extends LanguageServer
 
         val reporter = new inox.DefaultReporter(immutable.Set[inox.DebugSection]())
         val inoxCtx = new inox.Context(reporter, new InterruptManager(reporter))
-        println("inoxCtx: " + inoxCtx)
         val stainlessCompiler = try {
           new DottyCompiler(inoxCtx)
         } catch {
@@ -99,8 +97,7 @@ class DottyLanguageServer extends LanguageServer
     val matchingConfig =
       drivers.keys.find(config => config.sourceDirectories.exists(sourceDir =>
         uri.getRawPath.startsWith(sourceDir.getAbsolutePath.toString)))
-    println(drivers.keys.map(_.sourceDirectories))
-    println("uri: " + uri)
+
     matchingConfig match {
       case Some(config) =>
         drivers(config)
