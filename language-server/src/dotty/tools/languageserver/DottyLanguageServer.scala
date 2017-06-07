@@ -50,6 +50,10 @@ class DottyLanguageServer extends LanguageServer
   import DottyLanguageServer._
   import InteractiveDriver._
 
+  import stainless.verification.VCStatus
+  import stainless.verification.VCStatus.Invalid
+
+
   import lsp4j.jsonrpc.{CancelChecker, CompletableFutures}
   import lsp4j.jsonrpc.messages.{Either => JEither}
   import lsp4j._
@@ -161,15 +165,64 @@ class DottyLanguageServer extends LanguageServer
     new InitializeResult(c)
   }
 
-  override def didOpen(params: DidOpenTextDocumentParams): Unit = thisServer.synchronized {
-    val document = params.getTextDocument
-    val uri = new URI(document.getUri)
-    val driver = driverFor(uri)
+  /* Helper classes (to format things) from Stainless */
+  case class Position(begin: Coord, end: Coord) {
+    override def toString: String = s"$begin->$end"
+  }
+  case class Coord(line: Int, col: Int) {
+    override def toString: String = s"$line:$col"
+  }
+  case class Status(name: String, cex: inox.Model) {
+    override def toString: String = s"$name\n$cex"
+  }
 
-    val text = document.getText
-    val diags = driver.run(uri, text)
+  def formatMessage(kind: String, info: Status) = {
+    val ret = s"${info.name.capitalize} $kind"
 
-    val compiler = driver.compiler.asInstanceOf[DottyCompiler]
+    if (info.name == "invalid")
+      ret + s"\nA counter example is :\n${info.cex}"
+    else
+      ret
+  }
+
+  // Converts Stainless' output into Diagnostic understandable by the IDE
+  def generate_diags(reports: Seq[List[Object]]): Seq[lsp4j.Diagnostic] = {
+    reports.map(x => x match {
+      case List(fd: String, pos_tmp: inox.utils.Position, kind: String, status: VCStatus[inox.Model]) =>
+        val info = status match { 
+          case Invalid(cex) => new Status(status.name, cex)
+          case _ => new Status(status.name, null)
+        }
+
+        val pos = pos_tmp match {
+          case inox.utils.NoPosition => new Position(new Coord(0, 0), new Coord(0, 0))
+          case pos @ inox.utils.OffsetPosition(line, col, _, file) =>
+            new Position(new Coord(line, col), new Coord(line, col))
+          case range: inox.utils.RangePosition =>
+            new Position(new Coord(range.focusBegin.line, range.focusBegin.col),
+              new Coord(range.focusEnd.line, range.focusEnd.col))
+        }
+
+        def severity(level: Int): DiagnosticSeverity = level match {
+          case interfaces.Diagnostic.INFO => DiagnosticSeverity.Information
+          case interfaces.Diagnostic.WARNING => DiagnosticSeverity.Warning
+          case interfaces.Diagnostic.ERROR => DiagnosticSeverity.Error
+        }
+
+        val di = new lsp4j.Diagnostic
+        di.setSeverity(severity(2))
+        val range = new lsp4j.Range(
+           new lsp4j.Position(pos.begin.line, pos.begin.col),
+           new lsp4j.Position(pos.end.line, pos.end.col)
+        )
+        di.setRange(range)
+        di.setCode("0")
+        di.setMessage(formatMessage(kind, info))
+        di
+      })
+  }
+
+  def verify(compiler: DottyCompiler): Seq[lsp4j.Diagnostic] = {
     val inoxCtx = compiler.getCtx
     val reporter = inoxCtx.reporter
 
@@ -179,12 +232,6 @@ class DottyLanguageServer extends LanguageServer
       verification.VerificationComponent,
       termination.TerminationComponent
     )
-
-    /*
-    println("extraction : " + compiler.extraction.hashCode)
-    println("program : " + program)
-    println("structure : " + structure)
-    */
 
     val activeComponents = components.filter { c =>
       inoxCtx.options.options.collectFirst {
@@ -199,16 +246,24 @@ class DottyLanguageServer extends LanguageServer
     }
 
     val reports = for (c <- toExecute) yield c(structure, program)
-    reports.foreach(_.emit())
+    val finalReports = reports.flatMap(x => x.emitIde)
 
-    /*
-    println("---- REPORTS ----")
-    reports.foreach(x => println(x.emitIde))
-    // */
+    generate_diags(finalReports)
+  }
+
+  override def didOpen(params: DidOpenTextDocumentParams): Unit = thisServer.synchronized {
+    val document = params.getTextDocument
+    val uri = new URI(document.getUri)
+    val driver = driverFor(uri)
+
+    val text = document.getText
+    val diags = driver.run(uri, text)
+
+    val compiler = driver.compiler.asInstanceOf[DottyCompiler]
 
     client.publishDiagnostics(new PublishDiagnosticsParams(
       document.getUri,
-      diags.flatMap(diagnostic).asJava))
+      (diags.flatMap(diagnostic) ++ verify(compiler)).asJava))
   }
 
   override def didChange(params: DidChangeTextDocumentParams): Unit = thisServer.synchronized {
@@ -222,9 +277,11 @@ class DottyLanguageServer extends LanguageServer
     val text = change.getText
     val diags = driver.run(uri, text)
 
+    val compiler = driver.compiler.asInstanceOf[DottyCompiler]
+
     client.publishDiagnostics(new PublishDiagnosticsParams(
       document.getUri,
-      diags.flatMap(diagnostic).asJava))
+      (diags.flatMap(diagnostic) ++ verify(compiler)).asJava))
   }
 
   override def didClose(params: DidCloseTextDocumentParams): Unit = thisServer.synchronized {
