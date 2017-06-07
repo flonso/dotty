@@ -207,9 +207,10 @@ class InteractiveDriver(settings: List[String], val compiler: Compiler) extends 
                           basePath + """./frontends/library/stainless/util/Random.scala"""
         ).map(x => new SourceFile(dotty.tools.io.AbstractFile.getFile(x), Codec.UTF8))
 
-      run.compileSources(List(source) ++ stainlessLibraryFiles)
+      run.compileSources(stainlessLibraryFiles ++ List(source))
       run.printSummary()
-      val t = run.units.head.tpdTree
+      // Since compiling multiple files, requires to get the correct tree for the opened source file (which is the last)
+      val t = run.units.last.tpdTree
       myOpenedTrees(uri) = topLevelClassTrees(t, source)
 
       reporter.removeBufferedMessages

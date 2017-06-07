@@ -184,12 +184,7 @@ class DottyLanguageServer extends LanguageServer
 
   // Converts Stainless' output into Diagnostic understandable by the IDE
   def generate_diags(reports: Seq[List[Object]]): Seq[lsp4j.Diagnostic] = {
-    reports.filter(x => x match {
-        case List(_, _, _, status: VCStatus[inox.Model]) => status match {
-          case Invalid(cex) => true
-          case _ => false
-        }
-      }).map(x => x match {
+    reports.map(x => x match {
       case List(fd: String, pos_tmp: inox.utils.Position, kind: String, status: VCStatus[inox.Model]) =>
         val info = status match { 
           case Invalid(cex) => new Status(status.name, cex)
@@ -205,6 +200,8 @@ class DottyLanguageServer extends LanguageServer
               new Coord(range.focusEnd.line, range.focusEnd.col))
         }
 
+        val sev = if(info.name == "invalid") 2 else 0
+
         def severity(level: Int): DiagnosticSeverity = level match {
           case interfaces.Diagnostic.INFO => DiagnosticSeverity.Information
           case interfaces.Diagnostic.WARNING => DiagnosticSeverity.Warning
@@ -212,11 +209,12 @@ class DottyLanguageServer extends LanguageServer
         }
 
         val di = new lsp4j.Diagnostic
-        di.setSeverity(severity(2))
+        di.setSeverity(severity(sev))
         val range = new lsp4j.Range(
            new lsp4j.Position(pos.begin.line, pos.begin.col),
            new lsp4j.Position(pos.end.line, pos.end.col)
         )
+
         di.setRange(range)
         di.setCode("0")
         di.setMessage(formatMessage(kind, info))
@@ -263,9 +261,13 @@ class DottyLanguageServer extends LanguageServer
 
     val compiler = driver.compiler.asInstanceOf[DottyCompiler]
 
+    val errorsExist = !diags.isEmpty && (diags.last.toString.contains("one error found") || diags.last.toString.contains("errors found"))
+
+    val finalDiags = if (errorsExist) diags.flatMap(diagnostic) else diags.flatMap(diagnostic) ++ verify(compiler)
+
     client.publishDiagnostics(new PublishDiagnosticsParams(
       document.getUri,
-      (diags.flatMap(diagnostic) ++ verify(compiler)).asJava))
+      finalDiags.asJava))
   }
 
   override def didChange(params: DidChangeTextDocumentParams): Unit = thisServer.synchronized {
@@ -281,9 +283,13 @@ class DottyLanguageServer extends LanguageServer
 
     val compiler = driver.compiler.asInstanceOf[DottyCompiler]
 
+    val errorsExist = !diags.isEmpty && (diags.last.toString.contains("one error found") || diags.last.toString.contains("errors found"))
+
+    val finalDiags = if (errorsExist) diags.flatMap(diagnostic) else diags.flatMap(diagnostic) ++ verify(compiler)
+
     client.publishDiagnostics(new PublishDiagnosticsParams(
       document.getUri,
-      (diags.flatMap(diagnostic) ++ verify(compiler)).asJava))
+      finalDiags.asJava))
   }
 
   override def didClose(params: DidCloseTextDocumentParams): Unit = thisServer.synchronized {
